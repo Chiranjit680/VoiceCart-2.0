@@ -1,3 +1,80 @@
+# Core web framework
+
+google-auth==2.27.0
+google-auth-oauthlib==1.2.0
+google-auth-httplib2==0.2.0
+google-api-python-client==2.116.0
+msal==1.26.0
+requests==2.31.0
+google-generativeai
+python-dotenv==1.0.0
+
+# For additional features (optional)
+redis==5.0.1  # For caching and message queuing
+celery==5.3.4  # For background task processing
+sqlalchemy==2.0.25  # For database storage
+pydantic==2.5.3  # For data validation
+
+fastapi
+uvicorn[standard]
+
+# Agentic + LLM orchestration
+langchain
+langgraph
+autogen-agentchat
+openai
+transformers
+huggingface_hub
+
+tiktoken
+
+# nlp basics
+nltk
+spacy
+
+
+# Embedding / vector db
+faiss-cpu
+chromadb
+
+# Task queues / background jobs
+celery
+redis
+
+# Database + ORM
+sqlalchemy
+alembic
+psycopg2-binary
+
+# Authentication / security
+python-jose[cryptography]
+passlib[bcrypt]
+bcrypt
+
+# Async HTTP clients
+httpx
+aiohttp
+
+# Data handling + utilities
+pydantic
+pydantic-settings
+python-dotenv
+requests
+
+
+# Observability + logging
+structlog
+loguru
+
+# Optional: ML + embeddings
+sentence-transformers
+
+# Optional: scheduling
+apscheduler
+
+# Optional: evaluation + metrics
+jsonlines
+
 faster-whisper
 python-multipart
 fastapi
