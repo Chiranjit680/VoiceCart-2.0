@@ -11,7 +11,7 @@ model_size = "base.en"
 model = WhisperModel(model_size, device="cpu", compute_type="int8")
 
 @app.post("/transcribe")
-async def transcribe_audio(file: UploadFile = File(...)):
+def transcribe_audio(file: UploadFile = File(...)):
     # faster-whisper accepts a binary file-like object directly!
     # No need to save to disk.
     
