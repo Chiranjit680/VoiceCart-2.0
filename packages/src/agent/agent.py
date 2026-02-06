@@ -18,19 +18,30 @@ from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from langchain.agents import create_agent
 from langchain_core.tools import tool
-from typing import TypedDict, Dict, List
+from typing import TypedDict, Dict, List, Optional
 from pydantic import BaseModel, Field
-from schemas import ShoppingResponse, RouterOutput
 from langchain_ollama import ChatOllama
+from sqlalchemy.orm import joinedload
+from sqlalchemy import or_
 
 try:
-    from backend.app import models, schemas, database
-    from backend.app.routers import cart, product, categories, search
+    from backend.app import models, database
+    from backend.app.models import Product, Cart, Orders, OrderItem, User, Category, ProductCategory
 except ImportError:
     print("Warning: Could not import backend modules. Make sure to run this script from the project root and that the backend is properly set up.")
     database = None
-    schemas = None
     models = None
+
+# --- Pydantic schemas for structured LLM output ---
+class ShoppingResponse(BaseModel):
+    """Structured output for shopping list agent."""
+    products: List[Dict] = Field(default_factory=list, description="List of product results")
+    message: str = Field(default="", description="Response message to the user")
+
+class RouterOutput(BaseModel):
+    """Structured output for the router node."""
+    next_agent: str = Field(description="The next agent to route to: SHOPPING_LIST_AGENT, CART_AGENT, or END")
+    reasoning: str = Field(default="", description="Brief reasoning for the routing decision")
 
 logger = logging.getLogger(__name__)
 Ollama_llm = ChatOllama(model="llama3:8b", temperature=0)
@@ -64,11 +75,30 @@ def add_to_cart(user_id: int, product_id: int, quantity: int = 1) -> str:
     """
     db = database.SessionLocal()
     try:
-        cart_item = schemas.CartCreate(product_id=product_id, quantity=quantity)
-        result = cart.add_product_to_cart(cart_item=cart_item, db=db, user_id=user_id)
-        return f"Added product {product_id} (x{quantity}) to the cart. Current quantity: {result.quantity}."
-    except HTTPException as e:
-        return f"Error: {e.detail}"
+        # Check product exists and has stock
+        prod = db.query(Product).filter(Product.id == product_id).first()
+        if not prod:
+            return f"Error: Product {product_id} not found."
+        if prod.stock < quantity:
+            return f"Error: Insufficient stock for product {product_id}. Available: {prod.stock}."
+
+        # Check if already in cart
+        existing = db.query(Cart).filter(
+            Cart.product_id == product_id,
+            Cart.user_id == user_id
+        ).first()
+
+        if existing:
+            existing.quantity += quantity
+            db.commit()
+            db.refresh(existing)
+            return f"Added product '{prod.name}' (x{quantity}) to the cart. Current quantity: {existing.quantity}."
+
+        new_item = Cart(user_id=user_id, product_id=product_id, quantity=quantity)
+        db.add(new_item)
+        db.commit()
+        db.refresh(new_item)
+        return f"Added product '{prod.name}' (x{quantity}) to the cart. Current quantity: {new_item.quantity}."
     except Exception as e:
         db.rollback()
         logger.error(f"add_to_cart failed: {e}")
@@ -88,7 +118,15 @@ def search_products(query: str) -> str:
         A string representation of the search results, including product names and IDs."""
     db = database.SessionLocal()
     try:
-        results = search.search_products(query=query, db=db)
+        words = query.strip().split()
+        conditions = []
+        for word in words:
+            term = f"%{word}%"
+            conditions.append(Product.name.ilike(term))
+            conditions.append(Product.brand_name.ilike(term))
+            conditions.append(Product.description.ilike(term))
+
+        results = db.query(Product).filter(or_(*conditions)).limit(50).all() if conditions else []
         if not results:
             return f"No products found matching '{query}'."
         return json.dumps([{"id": p.id, "name": p.name, "price": float(p.price), "stock": p.stock} for p in results])
@@ -111,12 +149,23 @@ def remove_from_cart(user_id: int, product_id: int, quantity: int =1) -> str:
         """
     db = database.SessionLocal()
     try:
-        result = cart.remove_product_from_cart(product_id=product_id, quantity=quantity, db=db, user_id=user_id)
-        if result is None:
+        cart_item = db.query(Cart).filter(
+            Cart.product_id == product_id,
+            Cart.user_id == user_id
+        ).first()
+
+        if not cart_item:
             return f"Product {product_id} not found in the cart."
-        return f"Removed product {product_id} (x{quantity}) from the cart. Current quantity: {result.quantity}."
-    except HTTPException as e:
-        return f"Error: {e.detail}"
+
+        if quantity >= cart_item.quantity:
+            db.delete(cart_item)
+            db.commit()
+            return f"Removed product {product_id} entirely from the cart."
+        else:
+            cart_item.quantity -= quantity
+            db.commit()
+            db.refresh(cart_item)
+            return f"Removed {quantity} unit(s) of product {product_id}. Remaining quantity: {cart_item.quantity}."
     except Exception as e:
         db.rollback()
         logger.error(f"remove_from_cart failed: {e}")
@@ -135,19 +184,22 @@ def get_user_cart(user_id: int) -> str:
     """
     db = database.SessionLocal()
     try:
-        cart_items = cart.get_cart_items(db=db, user_id=user_id)
+        cart_items = db.query(Cart)\
+            .options(joinedload(Cart.product))\
+            .filter(Cart.user_id == user_id)\
+            .all()
         if not cart_items:
             return "Your cart is empty."
         cart_details = []
         for item in cart_items:
-            product = product.get_product_by_id(db=db, product_id=item.product_id)
-            if product:
+            prod = item.product
+            if prod:
                 cart_details.append({
-                    "product_id": product.id,
-                    "name": product.name,
+                    "product_id": prod.id,
+                    "name": prod.name,
                     "quantity": item.quantity,
-                    "price_per_unit": float(product.price),
-                    "total_price": float(product.price) * item.quantity
+                    "price_per_unit": float(prod.price),
+                    "total_price": float(prod.price) * item.quantity
                 })
         return json.dumps(cart_details)
     except Exception as e:
@@ -157,9 +209,160 @@ def get_user_cart(user_id: int) -> str:
         db.close()
 
 
+@tool
+def checkout_cart(user_id: int) -> str:
+    """Simulate the checkout process for the user's cart.
 
+    Args:
+        user_id: The ID of the user whose cart to checkout.
+    Returns:
+        A string message confirming the checkout and providing a summary of the order.
+    """
+    
+    db = database.SessionLocal()
+    try:
+        cart_items = db.query(Cart)\
+            .options(joinedload(Cart.product))\
+            .filter(Cart.user_id == user_id)\
+            .all()
+        if not cart_items:
+            return "Your cart is empty. Add items before checking out."
+        
+        order_summary = []
+        total_cost = 0.0
+        
+        for item in cart_items:
+            prod = item.product
+            if prod:
+                item_total = float(prod.price) * item.quantity
+                total_cost += item_total
+                order_summary.append({
+                    "product_id": prod.id,
+                    "name": prod.name,
+                    "quantity": item.quantity,
+                    "price_per_unit": float(prod.price),
+                    "total_price": item_total
+                })
+        
+        return f"Checkout successful! Order summary: {json.dumps(order_summary)}, Total cost: ${total_cost:.2f}"
+    except Exception as e:
+        logger.error(f"checkout_cart failed: {e}")
+        return f"Error: Failed to checkout — {e}"
+    finally:
+        db.close()
 
+@tool
+def view_orders(user_id: int) -> str:
+    """View past orders for the user.
 
+    Args:
+        user_id: The ID of the user whose orders to view.
+    Returns:
+        A string representation of the user's past orders, including order details and statuses.
+    """
+    db = database.SessionLocal()
+    try:
+        user_orders = db.query(Orders)\
+            .options(
+                joinedload(Orders.items).joinedload(OrderItem.product)
+            )\
+            .filter(Orders.user_id == user_id)\
+            .all()
+        if not user_orders:
+            return "You have no past orders."
+        
+        order_details = []
+        for order in user_orders:
+            order_items = []
+            for item in order.items:
+                prod = item.product
+                if prod:
+                    order_items.append({
+                        "product_id": prod.id,
+                        "name": prod.name,
+                        "quantity": item.quantity,
+                        "price_per_unit": float(item.price),
+                        "total_price": float(item.price) * item.quantity
+                    })
+            order_details.append({
+                "order_id": order.id,
+                "items": order_items,
+                "total_cost": float(order.total_amount),
+                "status": order.status
+            })
+        
+        return json.dumps(order_details)
+    except Exception as e:
+        logger.error(f"view_orders failed: {e}")
+        return f"Error: Failed to retrieve orders — {e}"
+    finally:
+        db.close()
+@tool
+def create_order(user_id: int) -> str:
+    """Create an order from the user's current cart.
+
+    Args:
+        user_id: The ID of the user whose order to create.
+    Returns:
+        A string message confirming the order creation and providing order details.
+    """
+    db = database.SessionLocal()
+    try:
+        # 1. Fetch cart items
+        cart_items = db.query(Cart).filter(Cart.user_id == user_id).all()
+        if not cart_items:
+            return "Your cart is empty. Add items before creating an order."
+
+        # 2. Get user address
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            return f"Error: User {user_id} not found."
+        address = user.address or "No address on file"
+
+        # 3. Calculate total & verify stock
+        total_amount = 0.0
+        for item in cart_items:
+            prod = db.query(Product).filter(Product.id == item.product_id).first()
+            if not prod:
+                return f"Error: Product {item.product_id} not found."
+            if prod.stock < item.quantity:
+                return f"Error: Insufficient stock for '{prod.name}'. Available: {prod.stock}."
+            total_amount += float(prod.price) * item.quantity
+
+        # 4. Create order
+        new_order = Orders(
+            user_id=user_id,
+            address=address,
+            total_amount=total_amount,
+            status="Pending"
+        )
+        db.add(new_order)
+        db.flush()  # Get order ID
+
+        # 5. Create order items & reduce stock
+        for item in cart_items:
+            prod = db.query(Product).filter(Product.id == item.product_id).first()
+            order_item = OrderItem(
+                order_id=new_order.id,
+                product_id=item.product_id,
+                quantity=item.quantity,
+                price=prod.price
+            )
+            db.add(order_item)
+            prod.stock -= item.quantity
+            prod.num_sold += item.quantity
+
+        # 6. Clear cart
+        db.query(Cart).filter(Cart.user_id == user_id).delete()
+
+        db.commit()
+        return f"Order #{new_order.id} created successfully! Total: ${total_amount:.2f}."
+    except Exception as e:
+        db.rollback()
+        logger.error(f"create_order failed: {e}")
+        return f"Error: Failed to create order — {e}"
+    finally:
+        db.close()
 
 #______________________________________________________________________________________________
 def cart_agent(state: AgentState):

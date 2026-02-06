@@ -1,0 +1,21 @@
+from fastapi import FastAPI, HTTPException
+from langchain_core.messages import BaseMessage, HumanMessage
+from agent_main import AgentExecutor
+import uvicorn
+app = FastAPI()
+
+@app.post("/agent/{user_id}")
+async def agent_endpoint(thread_id: str, state: dict):
+    if thread_id != state.get("thread_id"):
+        raise HTTPException(status_code=400, detail="Thread ID mismatch")
+    try:
+        response = await AgentExecutor().invoke(state)
+        return {"response": response}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+        
+        
+if __name__ == "__main__":
+        uvicorn.run(app, host="0.0.0.0", port=8067)
+        
+    
