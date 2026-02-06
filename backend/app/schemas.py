@@ -1,5 +1,5 @@
-from typing import List, Optional, Dict
-from pydantic import BaseModel, EmailStr, ConfigDict
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, EmailStr, ConfigDict, field_validator
 from datetime import datetime
 
 # --- Token ---
@@ -20,14 +20,12 @@ class CategoryOut(BaseModel):
     name: str
     parent_id: Optional[int] = None
     
-    # Pydantic V2 config
     model_config = ConfigDict(from_attributes=True)
 
 # --- Product Images ---
 class ProductImageOut(BaseModel):
     id: int
     product_id: int
-    # We generally don't send the raw bytes unless specifically requested
     model_config = ConfigDict(from_attributes=True)
 
 # --- Products ---
@@ -41,7 +39,6 @@ class ProductBase(BaseModel):
     brand_name: Optional[str] = None
 
 class ProductCreate(ProductBase):
-    # Restored: The router checks 'if product.image:', so this field is required here
     image: Optional[bytes] = None 
 
 class ProductUpdate(BaseModel):
@@ -52,10 +49,9 @@ class ProductUpdate(BaseModel):
     for_sale: Optional[bool] = None
     stock: Optional[int] = None
     brand_name: Optional[str] = None
-    # Restored: The router update logic checks for this field
     image: Optional[bytes] = None 
 
-# LITE Schema: For Lists / Search Results (No Heavy Images)
+# LITE Schema
 class ProductOutLite(ProductBase):
     id: int
     created_at: datetime
@@ -66,10 +62,26 @@ class ProductOutLite(ProductBase):
     
     model_config = ConfigDict(from_attributes=True)
 
-# DETAIL Schema: For Single Product View (Includes Images)
+    # --- THE FIX IS HERE ---
+    @field_validator('categories', mode='before')
+    @classmethod
+    def flatten_categories(cls, v: Any):
+        """
+        Extracts the actual Category object from the ProductCategory association object.
+        """
+        if not v:
+            return []
+        
+        # If the item is the association object (has 'category' attribute), unpack it.
+        # We check the first item to determine the type of list.
+        first_item = v[0]
+        if hasattr(first_item, 'category'):
+            return [item.category for item in v]
+        
+        return v
+
+# DETAIL Schema
 class ProductOutDetail(ProductOutLite):
-    # We can include images here if we want to show them in the detail view
-    # images: List[ProductImageOut] = []
     pass 
 
 class ProductSearchOut(ProductOutLite):
@@ -104,7 +116,7 @@ class CartOut(BaseModel):
     user_id: int
     product_id: int
     quantity: int
-    product: Optional[ProductOutLite] = None # Use Lite version here!
+    product: Optional[ProductOutLite] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -153,10 +165,14 @@ class ReviewOut(BaseModel):
     comment: Optional[str] = None
     created_at: datetime
     user: Optional[UserOut] = None
-    # Restored: Needed for the reviews router which does joinedload(product)
     product: Optional[ProductOutLite] = None 
     
     model_config = ConfigDict(from_attributes=True)
+
+# --- Chat ---
+class ChatInput(BaseModel):
+    input_text: str
+    conversation_id: Optional[str] = None
 
 # from typing import List, Optional, Dict
 # from pydantic import BaseModel, EmailStr

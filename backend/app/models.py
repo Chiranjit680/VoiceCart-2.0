@@ -2,6 +2,7 @@ from sqlalchemy import Boolean, Column, Integer, String, ForeignKey, JSON, DECIM
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql.expression import text
 from sqlalchemy.sql.sqltypes import TIMESTAMP
+from sqlalchemy.dialects.postgresql import JSONB
 from .database import Base
 
 class User(Base):
@@ -27,7 +28,9 @@ class Product(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, nullable=False)
     name = Column(String, nullable=False)
     description = Column(String, nullable=True)
-    specs = Column(JSON, nullable=True)
+
+    specs = Column(JSONB, nullable=True) # Using JSONB for better performance with PostgreSQL
+
     price = Column(DECIMAL(precision=10, scale=2), nullable=False)
     for_sale = Column(Boolean, default=True, nullable=False)
     stock = Column(Integer, default=0, nullable=False)

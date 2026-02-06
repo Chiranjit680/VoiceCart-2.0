@@ -1,70 +1,69 @@
-from fastapi import APIRouter, Depends, HTTPException
+# Build 3 - amazing
+
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, desc, case, cast, String
-from typing import List
+from typing import List, Optional
 from .. import models, schemas, database
 from ..utils import filter as filter_utils
 
 router = APIRouter(prefix="/search", tags=["search"])
 
-@router.get("/products", response_model=List[schemas.ProductSearchOut])
+# CHANGED: Use @router.post to accept the JSON body with filters/categories correctly
+@router.post("/products", response_model=List[schemas.ProductSearchOut])
 def search_products(
-    query: str,
-    filters: dict = None, 
-    categories: List[str] = None, 
+    # Use Body() to explicitly map JSON keys to arguments if needed, 
+    # but strictly matching keys works too.
+    query: str = Body(..., embed=True), # Expects {"query": "..."} inside body or handle as query param
+    # simpler: just accept a Pydantic model for the whole body, but let's stick to your structure:
+    # If client sends: { "query": "sony", "filters": {...}, "categories": [...] }
+    filters: dict = Body(None), 
+    categories: List[str] = Body(None), 
     db: Session = Depends(database.get_db)
 ):
     if not query:
         raise HTTPException(status_code=400, detail="Query required")
 
-    # Clean query
     query_str = query.strip()
     words = query_str.split()
     
-    # 1. Base Query
-    sql_query = db.query(models.Product)
+    # 1. Base Query - JOIN CATEGORIES immediately
+    sql_query = db.query(models.Product).join(models.Product.categories).join(models.ProductCategory.category)
 
-    # 2. Filter: Determine candidates (Must match at least ONE word from the query)
-    # We construct a massive OR clause to filter out completely irrelevant items first.
-    # This keeps the scoring logic faster.
+    # 2. Text Matching Logic
     match_conditions = []
     for word in words:
         term = f"%{word}%"
         match_conditions.append(models.Product.name.ilike(term))
         match_conditions.append(models.Product.brand_name.ilike(term))
         match_conditions.append(models.Product.description.ilike(term))
-        # Optional: Check specs too if you really need deep search (slower)
-        # match_conditions.append(cast(models.Product.specs, String).ilike(term))
+        match_conditions.append(cast(models.Product.specs, String).ilike(term))
+        match_conditions.append(models.Category.name.ilike(term))
 
     sql_query = sql_query.filter(or_(*match_conditions))
 
-    # 3. Apply Utility Filters (Price, Categories, etc.)
-    sql_query = filter_utils.filter_products(sql_query, categories, filters)
+    # --- THE FIX IS HERE ---
+    # Apply Category Filter manually on the EXISTING join
+    if categories:
+        sql_query = sql_query.filter(models.Category.name.in_(categories))
 
-    # 4. SCORING ALGORITHM (The "Red Shoe" Fix)
-    # We sum up the score for EACH word in the query against ALL fields.
+    # 3. Apply Utility Filters
+    # PASS categories=None to prevent filter_utils from joining the table a second time!
+    sql_query = filter_utils.filter_products(sql_query, categories=None, filters=filters)
+
+    # 4. Scoring Algorithm
     total_score = 0
-    
     for word in words:
         term = f"%{word}%"
-        
-        # Name match = 10 points
         total_score += case((models.Product.name.ilike(term), 10), else_=0)
-        
-        # Brand match = 6 points
         total_score += case((models.Product.brand_name.ilike(term), 6), else_=0)
-        
-        # Description match = 2 points
+        total_score += case((models.Category.name.ilike(term), 4), else_=0)
         total_score += case((models.Product.description.ilike(term), 2), else_=0)
-        
-        # Specs (JSON) match = 2 points
-        # We cast JSON to string to search inside it
         total_score += case((cast(models.Product.specs, String).ilike(term), 2), else_=0)
 
-    # 5. Sort by Score (Highest First), then by Popularity (Num Sold)
-    sql_query = sql_query.order_by(desc(total_score), desc(models.Product.num_sold))
+    # 5. Sort & Fetch
+    sql_query = sql_query.distinct().order_by(desc(total_score), desc(models.Product.num_sold))
 
-    # 6. Eager Load & Limit
     results = sql_query.options(
         joinedload(models.Product.categories).joinedload(models.ProductCategory.category)
     ).limit(50).all()
@@ -72,29 +71,246 @@ def search_products(
     if not results:
         raise HTTPException(status_code=404, detail="No products found")
 
-    # 7. Map to Schema (Pass the calculated score to the frontend if needed)
+    # 6. Map to Schema
     response = []
-    
-    # We can re-calculate the Python score for the UI 'relevance_score' field 
-    # OR strictly trust the order. For display, let's mirror the logic simply.
-    q_lower = query_str.lower()
-    
     for p in results:
-        # Simple python recalculation for the API response field
-        # (The DB has already done the heavy lifting of sorting)
         ui_score = 0
         p_txt = (p.name + " " + (p.description or "") + " " + (p.brand_name or "") + " " + str(p.specs or "")).lower()
+        cat_names = " ".join([c.category.name for c in p.categories]).lower()
         
-        # Simple frequency count for UI score
         for word in words:
-            if word.lower() in p_txt:
-                ui_score += 10
-        
-        p_out = schemas.ProductSearchOut.model_validate(p, from_attributes=True)
-        p_out.relevance_score = ui_score
+            w = word.lower()
+            if w in p.name.lower(): ui_score += 10
+            elif w in (p.brand_name or "").lower(): ui_score += 6
+            elif w in cat_names: ui_score += 4
+            elif w in p_txt: ui_score += 2
+
+        base_product = schemas.ProductOutLite.model_validate(p, from_attributes=True)
+        p_out = schemas.ProductSearchOut(
+            **base_product.model_dump(),
+            relevance_score=ui_score
+        )
         response.append(p_out)
 
     return response
+
+# from fastapi import APIRouter, Depends, HTTPException
+# from sqlalchemy.orm import Session, joinedload
+# from sqlalchemy import or_, desc, case, cast, String
+# from typing import List
+# from .. import models, schemas, database
+# from ..utils import filter as filter_utils
+
+# router = APIRouter(prefix="/search", tags=["search"])
+
+# @router.post("/products", response_model=List[schemas.ProductSearchOut])
+# def search_products(
+#     query: str,
+#     filters: dict = None, 
+#     categories: List[str] = None, 
+#     db: Session = Depends(database.get_db)
+# ):
+#     if not query:
+#         raise HTTPException(status_code=400, detail="Query required")
+
+#     query_str = query.strip()
+#     words = query_str.split()
+    
+#     # 1. Base Query - JOIN CATEGORIES immediately so we can search them
+#     # We use distinct() because matching multiple categories would duplicate rows
+#     sql_query = db.query(models.Product).join(models.Product.categories).join(models.ProductCategory.category)
+
+#     # 2. Filter: Match query against Name, Brand, Description, SPECS, or CATEGORY NAME
+#     match_conditions = []
+#     for word in words:
+#         term = f"%{word}%"
+#         match_conditions.append(models.Product.name.ilike(term))
+#         match_conditions.append(models.Product.brand_name.ilike(term))
+#         match_conditions.append(models.Product.description.ilike(term))
+        
+#         # NEW: Search inside JSONB Specs (Cast to string first)
+#         match_conditions.append(cast(models.Product.specs, String).ilike(term))
+        
+#         # NEW: Search Category Names (e.g., "TV", "Dolby")
+#         match_conditions.append(models.Category.name.ilike(term))
+
+#     sql_query = sql_query.filter(or_(*match_conditions))
+
+#     # 3. Apply Utility Filters (Price, etc.)
+#     # Note: filter_products might add its own joins, but SQLAlchemy handles redundant joins reasonably well
+#     sql_query = filter_utils.filter_products(sql_query, categories, filters)
+
+#     # 4. SCORING ALGORITHM
+#     total_score = 0
+    
+#     for word in words:
+#         term = f"%{word}%"
+        
+#         # Name match = 10 points
+#         total_score += case((models.Product.name.ilike(term), 10), else_=0)
+        
+#         # Brand match = 6 points
+#         total_score += case((models.Product.brand_name.ilike(term), 6), else_=0)
+        
+#         # Category match = 4 points (High relevance for classification)
+#         total_score += case((models.Category.name.ilike(term), 4), else_=0)
+
+#         # Description match = 2 points
+#         total_score += case((models.Product.description.ilike(term), 2), else_=0)
+        
+#         # Specs match = 2 points
+#         total_score += case((cast(models.Product.specs, String).ilike(term), 2), else_=0)
+
+#     # 5. Sort & Distinct
+#     # distinct() is required because we joined categories (1-to-Many)
+#     sql_query = sql_query.distinct().order_by(desc(total_score), desc(models.Product.num_sold))
+
+#     # 6. Fetch Results
+#     results = sql_query.options(
+#         joinedload(models.Product.categories).joinedload(models.ProductCategory.category)
+#     ).limit(50).all()
+
+#     if not results:
+#         raise HTTPException(status_code=404, detail="No products found")
+
+#     # 7. Map to Schema
+#     response = []
+#     q_lower = query_str.lower()
+    
+#     for p in results:
+#         # Calculate UI Score (Python side for display)
+#         ui_score = 0
+        
+#         # Check text fields
+#         p_txt = (p.name + " " + (p.description or "") + " " + (p.brand_name or "") + " " + str(p.specs or "")).lower()
+        
+#         # Check categories for the score
+#         cat_names = " ".join([c.category.name for c in p.categories]).lower()
+        
+#         for word in words:
+#             w = word.lower()
+#             if w in p.name.lower(): ui_score += 10
+#             elif w in (p.brand_name or "").lower(): ui_score += 6
+#             elif w in cat_names: ui_score += 4
+#             elif w in p_txt: ui_score += 2
+
+#         base_product = schemas.ProductOutLite.model_validate(p, from_attributes=True)
+        
+#         p_out = schemas.ProductSearchOut(
+#             **base_product.model_dump(),
+#             relevance_score=ui_score
+#         )
+#         response.append(p_out)
+
+#     return response
+
+# Build 2
+
+# from fastapi import APIRouter, Depends, HTTPException
+# from sqlalchemy.orm import Session, joinedload
+# from sqlalchemy import or_, desc, case, cast, String
+# from typing import List
+# from .. import models, schemas, database
+# from ..utils import filter as filter_utils
+
+# router = APIRouter(prefix="/search", tags=["search"])
+
+# @router.get("/products", response_model=List[schemas.ProductSearchOut])
+# def search_products(
+#     query: str,
+#     filters: dict = None, 
+#     categories: List[str] = None, 
+#     db: Session = Depends(database.get_db)
+# ):
+#     if not query:
+#         raise HTTPException(status_code=400, detail="Query required")
+
+#     # Clean query
+#     query_str = query.strip()
+#     words = query_str.split()
+    
+#     # 1. Base Query
+#     sql_query = db.query(models.Product)
+
+#     # 2. Filter: Determine candidates (Must match at least ONE word from the query)
+#     # We construct a massive OR clause to filter out completely irrelevant items first.
+#     # This keeps the scoring logic faster.
+#     match_conditions = []
+#     for word in words:
+#         term = f"%{word}%"
+#         match_conditions.append(models.Product.name.ilike(term))
+#         match_conditions.append(models.Product.brand_name.ilike(term))
+#         match_conditions.append(models.Product.description.ilike(term))
+#         # Optional: Check specs too if you really need deep search (slower)
+#         # match_conditions.append(cast(models.Product.specs, String).ilike(term))
+
+#     sql_query = sql_query.filter(or_(*match_conditions))
+
+#     # 3. Apply Utility Filters (Price, Categories, etc.)
+#     sql_query = filter_utils.filter_products(sql_query, categories, filters)
+
+#     # 4. SCORING ALGORITHM (The "Red Shoe" Fix)
+#     # We sum up the score for EACH word in the query against ALL fields.
+#     total_score = 0
+    
+#     for word in words:
+#         term = f"%{word}%"
+        
+#         # Name match = 10 points
+#         total_score += case((models.Product.name.ilike(term), 10), else_=0)
+        
+#         # Brand match = 6 points
+#         total_score += case((models.Product.brand_name.ilike(term), 6), else_=0)
+        
+#         # Description match = 2 points
+#         total_score += case((models.Product.description.ilike(term), 2), else_=0)
+        
+#         # Specs (JSON) match = 2 points
+#         # We cast JSON to string to search inside it
+#         total_score += case((cast(models.Product.specs, String).ilike(term), 2), else_=0)
+
+#     # 5. Sort by Score (Highest First), then by Popularity (Num Sold)
+#     sql_query = sql_query.order_by(desc(total_score), desc(models.Product.num_sold))
+
+#     # 6. Eager Load & Limit
+#     results = sql_query.options(
+#         joinedload(models.Product.categories).joinedload(models.ProductCategory.category)
+#     ).limit(50).all()
+
+#     if not results:
+#         raise HTTPException(status_code=404, detail="No products found")
+
+#     # 7. Map to Schema (Pass the calculated score to the frontend if needed)
+#     response = []
+    
+#     # We can re-calculate the Python score for the UI 'relevance_score' field 
+#     # OR strictly trust the order. For display, let's mirror the logic simply.
+#     q_lower = query_str.lower()
+    
+#     for p in results:
+#         # Simple python recalculation for the API response field
+#         # (The DB has already done the heavy lifting of sorting)
+#         ui_score = 0
+#         p_txt = (p.name + " " + (p.description or "") + " " + (p.brand_name or "") + " " + str(p.specs or "")).lower()
+        
+#         # Simple frequency count for UI score
+#         for word in words:
+#             if word.lower() in p_txt:
+#                 ui_score += 10
+        
+#         # 1. Convert DB Model -> Base Pydantic Model (ignores missing relevance_score)
+#         base_product = schemas.ProductOutLite.model_validate(p, from_attributes=True)
+        
+#         # 2. Create Final Search Schema manually adding the score
+#         p_out = schemas.ProductSearchOut(
+#             **base_product.model_dump(),
+#             relevance_score=ui_score
+#         )
+#         response.append(p_out)
+
+#     return response
+
+# build 1
 
 # from time import sleep
 # from fastapi import APIRouter, Depends, HTTPException
