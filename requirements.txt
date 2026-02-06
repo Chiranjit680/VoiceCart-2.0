@@ -49,7 +49,7 @@ psycopg2-binary
 # Authentication / security
 python-jose[cryptography]
 passlib[bcrypt]
-bcrypt
+bcrypt==4.0.1
 
 # Async HTTP clients
 httpx
@@ -83,3 +83,11 @@ pydantic
 numpy
 ffmpeg-python
 websockets
+sqlalchemy
+alembic
+psycopg2-binary
+python-jose[cryptography]
+passlib[bcrypt]
+dotenv
+pydantic-settings
+pydantic[email]
