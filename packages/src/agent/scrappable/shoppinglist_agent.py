@@ -1,30 +1,39 @@
 from typing import Any, Dict, List
-from langchain_core.messages import BaseMessage
-from langchain_core.prompts import PromptTemplate
+from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.tools import tool
-from langchain.agents import AgentExecutor, create_react_agent
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langgraph.prebuilt import create_react_agent
 from dotenv import load_dotenv
 import os
 import json
-from dummydb import products_db
-# Add these lines at the top of your file
-import sys
-import os
-from agent_main import llm
 
-# Add the parent directory to the path to find modules
-parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(parent_dir)
-
-# Now try importing your module
-from utils.json_formatters import beautify_json
-
-# Rest of your imports and code follows...
 load_dotenv()
-gemini_api_key = os.getenv("GEMINI_API_KEY")
 
-# ------------------ Allergy keyword DB --------------------
+# ── Sample Products Database ────────────────────────────────
+products_db = {
+    "milk":          {"price": 3.99, "vegan": False},
+    "eggs":          {"price": 2.49, "vegan": False},
+    "bread":         {"price": 2.99, "vegan": True},
+    "cheese":        {"price": 4.99, "vegan": False},
+    "butter":        {"price": 3.49, "vegan": False},
+    "tofu":          {"price": 2.99, "vegan": True},
+    "oat milk":      {"price": 4.49, "vegan": True},
+    "chicken":       {"price": 7.99, "vegan": False},
+    "rice":          {"price": 1.99, "vegan": True},
+    "pasta":         {"price": 1.49, "vegan": True},
+    "tomato sauce":  {"price": 2.29, "vegan": True},
+    "peanut butter": {"price": 3.99, "vegan": True},
+    "almond milk":   {"price": 4.99, "vegan": True},
+    "yogurt":        {"price": 3.29, "vegan": False},
+    "banana":        {"price": 0.59, "vegan": True},
+    "apple":         {"price": 0.99, "vegan": True},
+    "spinach":       {"price": 2.49, "vegan": True},
+    "salmon":        {"price": 9.99, "vegan": False},
+    "ground beef":   {"price": 6.99, "vegan": False},
+    "olive oil":     {"price": 5.99, "vegan": True},
+}
+
+# ── Allergen Keywords ───────────────────────────────────────
 allergen_keywords = {
     "nuts": ["peanut", "almond", "walnut", "cashew", "pecan", "hazelnut", "pistachio", "tree nuts"],
     "dairy": ["milk", "cheese", "butter", "cream", "lactose", "casein", "whey"],
@@ -36,10 +45,7 @@ allergen_keywords = {
     "sesame": ["sesame", "tahini"]
 }
 
-# ------------------ LLM --------------------
-
-
-# ------------------ Tools --------------------
+# ── Tools ───────────────────────────────────────────────────
 @tool
 def check_for_allergies(input_data: str) -> str:
     """
@@ -177,73 +183,51 @@ def check_vegan_status(input_data: str) -> str:
     
     if non_vegan:
         return f"❌ Not Vegan: {', '.join(non_vegan)}"
-    return "✅ All items are vegan-friendly."# Create the list of tools
-tools = [check_for_allergies, check_budget, check_vegan_status]
+    return "✅ All items are vegan-friendly."
 
-# Get tool descriptions and names for the prompt
-tool_descriptions = "\n".join([f"{tool.name}: {tool.description}" for tool in tools])
-tool_names = ", ".join([tool.name for tool in tools])
 
-# ReAct agent prompt with properly formatted agent_scratchpad
-prompt = PromptTemplate(
-    template="""You are VoiceCart, an intelligent shopping assistant. Help users with:
+# ═══════════════════════════════════════════════════════════════
+#  Exports for the main VoiceCart graph  (agent_main.py)
+# ═══════════════════════════════════════════════════════════════
+shopping_list_tools = [check_for_allergies, check_budget, check_vegan_status]
 
-1. Generate shopping lists based on goals (meals, dietary needs, budgets)
-2. Check for allergens in shopping items
-3. Verify if items are vegan-friendly
-4. Ensure budget compliance
-5. Provide helpful, friendly, and concise shopping recommendations
-6. Provide final answers in a clear, list format
-You have access to these tools:
-{tools}
+SHOPPING_LIST_SYSTEM_PROMPT = """You are VoiceCart's Shopping-List Agent.
 
-Use this format:
+You help users:
+1. Generate shopping lists based on meals, dietary needs, and budgets.
+2. Check for allergens in shopping items.
+3. Verify whether items are vegan-friendly.
+4. Ensure budget compliance.
+5. Provide helpful, friendly, and concise shopping recommendations.
+6. Return final answers in a clear list format.
 
-Question: the user's request
-Thought: your reasoning
-Action: the action to take, should be one of [{tool_names}]
-Action Input: the input to the action
-Observation: the result of the action
-... (this Thought/Action/Action Input/Observation can repeat N times)
-Thought: I now know the final answer
-Final Answer: final result
+Use the tools available to you whenever a concrete check is needed."""
 
-Question: {input}
-{agent_scratchpad}""",
-    input_variables=["input", "agent_scratchpad", "tools", "tool_names"]
-)
 
-# ------------------ Agent + Executor --------------------
-def initialize_react_agent(llm=llm):
-    """
-    Create a ReAct agent with the given LLM, tools, and prompt.
-    """
-   
-    
-    agent = create_react_agent(
-    llm=llm,
-    tools=tools,
-    prompt=prompt
-    )
+class ShoppingListAgent:
+    """Standalone wrapper — also usable as a LangGraph node callable."""
 
-    agent_exec = AgentExecutor(
-    agent=agent,
-    tools=tools,
-    verbose=True,
-    return_intermediate_steps=True,
-    max_iterations=10
+    def __init__(self):
+        self.llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0)
+        self.agent = create_react_agent(
+            model=self.llm,
+            tools=shopping_list_tools,
+            prompt=SHOPPING_LIST_SYSTEM_PROMPT,
         )
-    return agent_exec
 
-# ------------------ Main Function for testing --------------------
+    def __call__(self, user_input: str) -> str:
+        result = self.agent.invoke(
+            {"messages": [HumanMessage(content=user_input)]}
+        )
+        return result["messages"][-1].content
+
+
+# ── Quick test ──────────────────────────────────────────────
 if __name__ == "__main__":
-    shopping_agent= initialize_react_agent()
-    response=shopping_agent.invoke(
-        {
-            "input": "I want to buy some groceries for the week. I need items for breakfast, lunch, and dinner. My budget is $50. I am allergic to nuts and dairy, and I prefer vegan options.",
-            "agent_scratchpad": ""
-        }
+    agent = ShoppingListAgent()
+    response = agent(
+        "I want to buy groceries for the week — breakfast, lunch, "
+        "and dinner. Budget is $50. I'm allergic to nuts and dairy "
+        "and prefer vegan options."
     )
-    print(response["output"])
-    
-
+    print(response)
