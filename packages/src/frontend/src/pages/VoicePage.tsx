@@ -29,7 +29,7 @@ export default function VoicePage() {
     setMessages((prev) => [...prev.slice(-200), { id: ++msgId, time: now(), text }]);
   }, []);
 
-  const { status, connect, disconnect, sendBlob } = useWebSocket(handleServerMessage);
+  const { status, connect, disconnect, sendBlob, sendText } = useWebSocket(handleServerMessage);
 
   const handleChunk = useCallback(
     async (blob: Blob) => {
@@ -40,8 +40,14 @@ export default function VoicePage() {
     [sendBlob, addLog]
   );
 
+  const handleRecordingStop = useCallback(() => {
+    const sent = sendText("END");
+    addLog(sent ? "Sent END signal — waiting for transcription…" : "END signal not sent — not connected");
+  }, [sendText, addLog]);
+
   const { isRecording, duration, start, stop } = useVoiceRecorder({
     onChunkReady: handleChunk,
+    onStop: handleRecordingStop,
     timeslice: 1000,
   });
 

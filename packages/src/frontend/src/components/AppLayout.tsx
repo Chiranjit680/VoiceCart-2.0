@@ -1,6 +1,6 @@
 import { Outlet, Link, useLocation } from "react-router-dom";
 import {
-  ShoppingCart, Package, Search, Grid3X3, ClipboardList, Mic, LogOut, LogIn, Star,
+  ShoppingCart, Package, Search, Grid3X3, ClipboardList, Mic, LogOut, LogIn, Star, Globe,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -13,6 +13,7 @@ const navItems = [
   { to: "/orders", label: "Orders", icon: ClipboardList },
   { to: "/reviews", label: "My Reviews", icon: Star },
   { to: "/voice", label: "Voice Assistant", icon: Mic },
+  { to: "/crawler", label: "Web Crawler", icon: Globe },
 ];
 
 export function AppLayout() {

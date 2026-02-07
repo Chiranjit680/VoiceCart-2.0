@@ -2,10 +2,11 @@ import { useState, useRef, useCallback } from "react";
 
 interface UseVoiceRecorderOptions {
   onChunkReady?: (blob: Blob) => void;
+  onStop?: () => void; // fires after the last chunk has been emitted
   timeslice?: number; // ms between chunks, undefined = single blob on stop
 }
 
-export function useVoiceRecorder({ onChunkReady, timeslice }: UseVoiceRecorderOptions = {}) {
+export function useVoiceRecorder({ onChunkReady, onStop, timeslice }: UseVoiceRecorderOptions = {}) {
   const [isRecording, setIsRecording] = useState(false);
   const [duration, setDuration] = useState(0);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -28,6 +29,7 @@ export function useVoiceRecorder({ onChunkReady, timeslice }: UseVoiceRecorderOp
 
     recorder.onstop = () => {
       stream.getTracks().forEach((t) => t.stop());
+      onStop?.();
     };
 
     recorderRef.current = recorder;
@@ -38,7 +40,7 @@ export function useVoiceRecorder({ onChunkReady, timeslice }: UseVoiceRecorderOp
     timerRef.current = setInterval(() => {
       setDuration((d) => d + 1);
     }, 1000);
-  }, [onChunkReady, timeslice]);
+  }, [onChunkReady, onStop, timeslice]);
 
   const stop = useCallback(() => {
     recorderRef.current?.stop();

@@ -47,5 +47,16 @@ export function useWebSocket(onMessage?: (data: string) => void) {
     return true;
   }, []);
 
-  return { status, connect, disconnect, sendBlob };
+  const sendText = useCallback((text: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      console.warn("WebSocket not connected");
+      return false;
+    }
+    ws.send(text);
+    console.log(`Sent text: ${text}`);
+    return true;
+  }, []);
+
+  return { status, connect, disconnect, sendBlob, sendText };
 }

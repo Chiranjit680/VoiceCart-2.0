@@ -14,6 +14,7 @@ import SearchPage from "@/pages/SearchPage";
 import CategoriesPage from "@/pages/CategoriesPage";
 import ReviewsPage from "@/pages/ReviewsPage";
 import VoicePage from "@/pages/VoicePage";
+import CrawlerPage from "@/pages/CrawlerPage";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -36,6 +37,7 @@ const App = () => (
               <Route path="/categories" element={<CategoriesPage />} />
               <Route path="/reviews" element={<ReviewsPage />} />
               <Route path="/voice" element={<VoicePage />} />
+              <Route path="/crawler" element={<CrawlerPage />} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>

@@ -1,7 +1,8 @@
 from fastapi import FastAPI, UploadFile, File
 from faster_whisper import WhisperModel
 import os
-
+import tempfile
+#8001 for STT microservice
 app = FastAPI()
 
 # CONFIGURATION
@@ -12,14 +13,19 @@ model = WhisperModel(model_size, device="cpu", compute_type="int8")
 
 @app.post("/transcribe")
 def transcribe_audio(file: UploadFile = File(...)):
-    # faster-whisper accepts a binary file-like object directly!
-    # No need to save to disk.
-    
-    segments, info = model.transcribe(file.file, beam_size=5)
-    
-    # "segments" is a generator. We must iterate to run the inference.
-    text = " ".join([segment.text for segment in segments])
-    
+    # Save to a temp file so av/ffmpeg can properly detect the format
+    # Browser MediaRecorder sends WebM/Opus — always use .webm so ffmpeg doesn't get confused
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as tmp:
+        tmp.write(file.file.read())
+        tmp_path = tmp.name
+
+    try:
+        segments, info = model.transcribe(tmp_path, beam_size=5)
+        # "segments" is a generator. We must iterate to run the inference.
+        text = " ".join([segment.text for segment in segments])
+    finally:
+        os.unlink(tmp_path)
+
     return {
         "text": text.strip(),
         "language": info.language,
