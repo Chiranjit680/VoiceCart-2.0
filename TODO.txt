@@ -1,0 +1,7 @@
+reorganize backed and frontend as they were
+
+optimize stt for doing everything in-memory, check manager for it too. do a "git blame"
+
+track changes till 6 30 of 7th feb
+
+add search to schema

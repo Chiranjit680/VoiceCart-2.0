@@ -11,8 +11,8 @@ from langchain_core.tools import tool
 from sqlalchemy.orm import joinedload
 
 try:
-    from backend.app import database
-    from backend.app.models import Product, Cart, Orders, OrderItem, User
+    from Backend.app import database
+    from Backend.app.models import Product, Cart, Orders, OrderItem, User
 except ImportError:
     logging.warning("Backend not available - tools will use mock data")
     database = None

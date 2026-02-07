@@ -12,6 +12,10 @@ async def agent_endpoint(user_id: int, body: dict):
             raise ValueError("Missing 'msg' field in request body")
         
         response = AgentExecutor().invoke(msg)
+
+        print("request:", msg)
+        print("response:", response)
+
         return {"response": response}
     except Exception as e:
         print(f"Error in Agent Endpoint: {e}")
