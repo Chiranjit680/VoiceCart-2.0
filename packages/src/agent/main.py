@@ -11,10 +11,13 @@ class AgentRequest(BaseModel):
 @app.post("/agent/{user_id}")
 async def agent_endpoint(user_id: int, body: AgentRequest):
     try:            
-        response = await AgentExecutor().invoke(body.msg)
+        response =  AgentExecutor().invoke(body.msg)
         return {"response": response}
     except Exception as e:
+        print(f"Error processing agent request for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+        
+    
         
         
 if __name__ == "__main__":

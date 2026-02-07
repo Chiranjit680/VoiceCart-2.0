@@ -68,8 +68,9 @@ class AgentState(TypedDict):
     products: List[Dict] | None
     cart: Dict | None
 
-LLM_Ollama=ChatOllama(model="mistral:7b", temperature=0)
+LLM_Ollama=ChatOllama(model="qwen2.5:3b", temperature=0)
 LLM_Gemini=ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0)
+LLM=LLM_Ollama
 # ═══════════════════════════════════════════════════════════════
 #  Agent Nodes
 # ═══════════════════════════════════════════════════════════════
@@ -80,10 +81,10 @@ def router_node(state: AgentState) -> AgentState:
     last_message = messages[-1].content if messages else ""
     
     try:
-        llm = LLM_Gemini
+        llm = LLM
         structured_llm = llm.with_structured_output(RouterOutput)
     except Exception as e:
-        logger.warning(f"Gemini failed: {e}")
+        logger.warning(f"Ollama failed: {e}")
         # Fallback: manual parsing
         llm = LLM_Ollama
         structured_llm = None
@@ -142,7 +143,7 @@ def shopping_list_agent_node(state: AgentState) -> AgentState:
     messages = state["messages"]
     user_input = messages[-1].content if messages else ""
     
-    llm = LLM_Gemini
+    llm = LLM
     
     system_prompt = """You are a shopping assistant helping users find products.
 
@@ -200,7 +201,7 @@ def cart_agent_node(state: AgentState) -> AgentState:
     messages = state["messages"]
     user_input = messages[-1].content if messages else ""
     
-    llm = LLM_Gemini
+    llm = LLM
     
     system_prompt = f"""You are a cart management assistant. User ID: {user_id}
 

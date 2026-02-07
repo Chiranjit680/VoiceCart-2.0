@@ -2,7 +2,7 @@ from typing import Any, Dict, List
 from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langgraph.prebuilt import create_react_agent
+from langchain_agents import create_agent
 from dotenv import load_dotenv
 import os
 import json
@@ -209,7 +209,7 @@ class ShoppingListAgent:
 
     def __init__(self):
         self.llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0)
-        self.agent = create_react_agent(
+        self.agent = create_agent(
             model=self.llm,
             tools=shopping_list_tools,
             prompt=SHOPPING_LIST_SYSTEM_PROMPT,

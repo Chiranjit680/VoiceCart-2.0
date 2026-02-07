@@ -118,15 +118,7 @@ def search_products(query: str) -> str:
         A string representation of the search results, including product names and IDs."""
     db = database.SessionLocal()
     try:
-        words = query.strip().split()
-        conditions = []
-        for word in words:
-            term = f"%{word}%"
-            conditions.append(Product.name.ilike(term))
-            conditions.append(Product.brand_name.ilike(term))
-            conditions.append(Product.description.ilike(term))
-
-        results = db.query(Product).filter(or_(*conditions)).limit(50).all() if conditions else []
+        results = search.search_products(query=query, db=db)
         if not results:
             return f"No products found matching '{query}'."
         return json.dumps([{"id": p.id, "name": p.name, "price": float(p.price), "stock": p.stock} for p in results])
