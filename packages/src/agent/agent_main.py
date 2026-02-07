@@ -14,6 +14,7 @@ load_dotenv()
 
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_ollama import ChatOllama
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.prompts import ChatPromptTemplate
@@ -67,7 +68,8 @@ class AgentState(TypedDict):
     products: List[Dict] | None
     cart: Dict | None
 
-
+LLM_Ollama=ChatOllama(model="mistral:7b", temperature=0)
+LLM_Gemini=ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0)
 # ═══════════════════════════════════════════════════════════════
 #  Agent Nodes
 # ═══════════════════════════════════════════════════════════════
@@ -78,12 +80,12 @@ def router_node(state: AgentState) -> AgentState:
     last_message = messages[-1].content if messages else ""
     
     try:
-        llm = ChatOllama(model="mistral:7b", temperature=0)
+        llm = LLM_Gemini
         structured_llm = llm.with_structured_output(RouterOutput)
     except Exception as e:
-        logger.warning(f"Ollama failed: {e}")
+        logger.warning(f"Gemini failed: {e}")
         # Fallback: manual parsing
-        llm = ChatOllama(model="llama3:8b", temperature=0)
+        llm = LLM_Ollama
         structured_llm = None
     
     system_prompt = """You are a routing agent for an e-commerce assistant.
@@ -140,7 +142,7 @@ def shopping_list_agent_node(state: AgentState) -> AgentState:
     messages = state["messages"]
     user_input = messages[-1].content if messages else ""
     
-    llm = ChatOllama(model="mistral:7b", temperature=0)
+    llm = LLM_Gemini
     
     system_prompt = """You are a shopping assistant helping users find products.
 
@@ -198,7 +200,7 @@ def cart_agent_node(state: AgentState) -> AgentState:
     messages = state["messages"]
     user_input = messages[-1].content if messages else ""
     
-    llm = ChatOllama(model="mistral:7b", temperature=0)
+    llm = LLM_Gemini
     
     system_prompt = f"""You are a cart management assistant. User ID: {user_id}
 
@@ -436,6 +438,7 @@ if __name__ == "__main__":
         "Add product 1 to my cart",
         "What's in my cart?",
     ]
+    
     
     for msg in tests:
         print(f"\n👤 User: {msg}")
