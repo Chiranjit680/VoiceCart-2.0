@@ -31,11 +31,12 @@ export default function VoicePage() {
 
   const { status, connect, disconnect, sendBlob, sendText } = useWebSocket(handleServerMessage);
 
+  // Send the full Blob after recording stops
   const handleChunk = useCallback(
     async (blob: Blob) => {
       const kb = (blob.size / 1024).toFixed(1);
       const sent = await sendBlob(blob);
-      addLog(sent ? `Sent chunk: ${kb} KB` : `Chunk ready (${kb} KB) — not connected`);
+      addLog(sent ? `Sent audio: ${kb} KB` : `Audio ready (${kb} KB) — not connected`);
     },
     [sendBlob, addLog]
   );
@@ -48,7 +49,7 @@ export default function VoicePage() {
   const { isRecording, duration, start, stop } = useVoiceRecorder({
     onChunkReady: handleChunk,
     onStop: handleRecordingStop,
-    timeslice: 1000,
+    // No timeslice: single Blob after stop
   });
 
   const handleConnect = useCallback(

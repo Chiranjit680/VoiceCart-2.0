@@ -11,6 +11,7 @@ export function useVoiceRecorder({ onChunkReady, onStop, timeslice }: UseVoiceRe
   const [duration, setDuration] = useState(0);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
 
   const start = useCallback(async () => {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -21,19 +22,27 @@ export function useVoiceRecorder({ onChunkReady, onStop, timeslice }: UseVoiceRe
       mimeType: "audio/webm;codecs=opus",
     });
 
+    chunksRef.current = [];
+
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) {
-        onChunkReady?.(e.data);
+        chunksRef.current.push(e.data);
       }
     };
 
     recorder.onstop = () => {
       stream.getTracks().forEach((t) => t.stop());
+      // Emit the single Blob after stop
+      if (chunksRef.current.length > 0) {
+        const fullBlob = new Blob(chunksRef.current, { type: "audio/webm" });
+        onChunkReady?.(fullBlob);
+      }
       onStop?.();
+      chunksRef.current = [];
     };
 
     recorderRef.current = recorder;
-    recorder.start(timeslice);
+    recorder.start(); // No timeslice: single Blob on stop
     setIsRecording(true);
     setDuration(0);
 
@@ -50,6 +59,7 @@ export function useVoiceRecorder({ onChunkReady, onStop, timeslice }: UseVoiceRe
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
+    // chunksRef.current will be cleared in onstop
   }, []);
 
   return { isRecording, duration, start, stop };

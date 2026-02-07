@@ -1,84 +1,84 @@
-from fastapi import FastAPI, UploadFile, File
-from faster_whisper import WhisperModel
-import os
-import tempfile
-#8001 for STT microservice
-app = FastAPI()
+# from fastapi import FastAPI, UploadFile, File
+# from faster_whisper import WhisperModel
+# import os
+# import tempfile
+# #8001 for STT microservice
+# app = FastAPI()
 
-# CONFIGURATION
-# "tiny" or "base" are best for real-time CPU. "small" might be too slow (~1-2s latency).
-# compute_type="int8" is the magic key for CPU speed.
-model_size = "base.en" 
-model = WhisperModel(model_size, device="cpu", compute_type="int8")
+# # CONFIGURATION
+# # "tiny" or "base" are best for real-time CPU. "small" might be too slow (~1-2s latency).
+# # compute_type="int8" is the magic key for CPU speed.
+# model_size = "base.en" 
+# model = WhisperModel(model_size, device="cpu", compute_type="int8")
 
-@app.post("/transcribe")
-def transcribe_audio(file: UploadFile = File(...)):
-    # Save to a temp file so av/ffmpeg can properly detect the format
-    # Browser MediaRecorder sends WebM/Opus — always use .webm so ffmpeg doesn't get confused
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as tmp:
-        tmp.write(file.file.read())
-        tmp_path = tmp.name
+# @app.post("/transcribe")
+# def transcribe_audio(file: UploadFile = File(...)):
+#     # Save to a temp file so av/ffmpeg can properly detect the format
+#     # Browser MediaRecorder sends WebM/Opus — always use .webm so ffmpeg doesn't get confused
+#     with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as tmp:
+#         tmp.write(file.file.read())
+#         tmp_path = tmp.name
 
-    try:
-        segments, info = model.transcribe(tmp_path, beam_size=5)
-        # "segments" is a generator. We must iterate to run the inference.
-        text = " ".join([segment.text for segment in segments])
-    finally:
-        os.unlink(tmp_path)
+#     try:
+#         segments, info = model.transcribe(tmp_path, beam_size=5)
+#         # "segments" is a generator. We must iterate to run the inference.
+#         text = " ".join([segment.text for segment in segments])
+#     finally:
+#         os.unlink(tmp_path)
 
-    return {
-        "text": text.strip(),
-        "language": info.language,
-        "probability": info.language_probability
-    }
+#     return {
+#         "text": text.strip(),
+#         "language": info.language,
+#         "probability": info.language_probability
+#     }
 
-if __name__ == "__main__":
-    import uvicorn
-    # Run on port 8001 to separate it from the Manager
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+# if __name__ == "__main__":
+#     import uvicorn
+#     # Run on port 8001 to separate it from the Manager
+#     uvicorn.run(app, host="0.0.0.0", port=8001)
 
 
-    """
-import httpx
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+#     """
+# import httpx
+# from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
-app = FastAPI()
+# app = FastAPI()
 
-# URL of your STT Microservice
-STT_SERVICE_URL = "http://localhost:8001/transcribe"
+# # URL of your STT Microservice
+# STT_SERVICE_URL = "http://localhost:8001/transcribe"
 
-@app.websocket("/ws/audio")
-async def audio_websocket(websocket: WebSocket):
-    await websocket.accept()
-    print("Client connected")
+# @app.websocket("/ws/audio")
+# async def audio_websocket(websocket: WebSocket):
+#     await websocket.accept()
+#     print("Client connected")
     
-    try:
-        while True:
-            # 1. Receive Audio Blob from Client (Browser/App)
-            # Expecting raw bytes (blob) from the frontend
-            audio_data = await websocket.receive_bytes()
+#     try:
+#         while True:
+#             # 1. Receive Audio Blob from Client (Browser/App)
+#             # Expecting raw bytes (blob) from the frontend
+#             audio_data = await websocket.receive_bytes()
             
-            # 2. Call STT Microservice
-            # We use httpx to post the bytes as a "file" to the STT service
-            async with httpx.AsyncClient() as client:
-                files = {'file': ('audio.wav', audio_data, 'audio/wav')}
-                response = await client.post(STT_SERVICE_URL, files=files)
+#             # 2. Call STT Microservice
+#             # We use httpx to post the bytes as a "file" to the STT service
+#             async with httpx.AsyncClient() as client:
+#                 files = {'file': ('audio.wav', audio_data, 'audio/wav')}
+#                 response = await client.post(STT_SERVICE_URL, files=files)
             
-            if response.status_code == 200:
-                transcription = response.json().get("text")
-                print(f"User said: {transcription}")
+#             if response.status_code == 200:
+#                 transcription = response.json().get("text")
+#                 print(f"User said: {transcription}")
                 
-                # 3. (Optional) Send text back to client for confirmation
-                await websocket.send_text(f"You said: {transcription}")
+#                 # 3. (Optional) Send text back to client for confirmation
+#                 await websocket.send_text(f"You said: {transcription}")
                 
-                # ... Next: Send 'transcription' to your Agent/LLM ...
-            else:
-                print("STT Error:", response.text)
+#                 # ... Next: Send 'transcription' to your Agent/LLM ...
+#             else:
+#                 print("STT Error:", response.text)
 
-    except WebSocketDisconnect:
-        print("Client disconnected")
-    """
-
+#     except WebSocketDisconnect:
+#         print("Client disconnected")
+#     """
+#----------------------------------------------------------------------------
 
 # Test code for direct WebSocket STT (no HTTP intermediary)
 
@@ -146,3 +146,63 @@ async def audio_websocket(websocket: WebSocket):
 # if __name__ == "__main__":
 #     # CHANGED PORT: 8000 (Matches your URI="ws://localhost:8000/ws/audio")
 #     uvicorn.run(app, host="0.0.0.0", port=8000)
+from fastapi import FastAPI, UploadFile, File
+from faster_whisper import WhisperModel
+import tempfile
+import subprocess
+import os
+
+app = FastAPI()
+model = WhisperModel("base.en", device="cpu", compute_type="int8")
+
+@app.post("/transcribe")
+def transcribe_audio(file: UploadFile = File(...)):
+    tmp_webm = None
+    tmp_wav = None
+    try:
+        # Save uploaded file
+        suffix = os.path.splitext(file.filename or "audio.webm")[1] or ".webm"
+        tmp_webm = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        content = file.file.read()
+        tmp_webm.write(content)
+        tmp_webm.close()
+
+        # Convert to WAV using ffmpeg
+        tmp_wav_path = tmp_webm.name + ".wav"
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-i", tmp_webm.name,
+                "-ar", "16000",
+                "-ac", "1",
+                "-c:a", "pcm_s16le",
+                tmp_wav_path
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode != 0:
+            print("ffmpeg error:", result.stderr)
+            return {"text": "", "error": "Audio conversion failed"}
+
+        # Transcribe the clean WAV
+        segments, info = model.transcribe(tmp_wav_path, beam_size=5)
+        text = " ".join(seg.text for seg in segments).strip()
+        return {"text": text}
+
+    except Exception as e:
+        print("STT error:", e)
+        return {"text": "", "error": str(e)}
+    finally:
+        for path in [tmp_webm.name if tmp_webm else None, tmp_wav_path if 'tmp_wav_path' in locals() else None]:
+            try:
+                if path and os.path.exists(path):
+                    os.unlink(path)
+            except Exception:
+                pass
+
+if __name__ == "__main__":
+    import uvicorn
+    # Run on port 8001 to separate it from the Manager
+    uvicorn.run(app, host="0.0.0.0", port=8001)
