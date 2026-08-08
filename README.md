@@ -1,3 +1,7 @@
 # VoiceCart-2.0
+
 Voice based agentic shopping platform
-[![Watch the demo](thumbnail.png)](https://github.com/Chiranjit680/VoiceCart-2.0/Demo/VoiceCart - Google Chrome 2026-02-07 13-44-20.mp4)
+
+## Demo
+
+🎥 [Watch the demo](./Demo/VoiceCart%20-%20Google%20Chrome%202026-02-07%2013-44-20.mp4)
