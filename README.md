@@ -3,5 +3,12 @@
 Voice based agentic shopping platform
 
 ## Demo
+<h2 align="center">🎥 Demo</h2>
 
-🎥 [Watch the demo](./Demo/VoiceCart%20-%20Google%20Chrome%202026-02-07%2013-44-20.mp4)
+<p align="center">
+  <a href="https://youtu.be/jr3y7Brf-hk">
+    <img src="https://img.youtube.com/vi/jr3y7Brf-hk/maxresdefault.jpg"
+         alt="VoiceCart Demo"
+         width="800">
+  </a>
+</p>
