@@ -220,7 +220,13 @@ This project is under active, fast-moving development. Notable in-progress items
 
 ## Demo
 
-A recorded walkthrough is available at `Demo/VoiceCart - Google Chrome 2026-02-07 13-44-20.mp4`.
+<p align="center">
+  <a href="https://youtu.be/jr3y7Brf-hk">
+    <img src="https://img.youtube.com/vi/jr3y7Brf-hk/maxresdefault.jpg"
+         alt="VoiceCart Demo"
+         width="800">
+  </a>
+</p>
 
 ## License
 
