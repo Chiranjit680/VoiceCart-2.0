@@ -67,6 +67,7 @@ def add_to_cart(user_id: int, product_id: int, quantity: int = 1) -> str:
         return f"✅ Mock: Added product {product_id} (x{quantity})"
     
     db = database.SessionLocal()
+    user_id=1
     try:
         # Check product exists
         prod = db.query(Product).filter(Product.id == product_id).first()
