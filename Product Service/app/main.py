@@ -4,11 +4,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from . import models
-from .routers import cart, orders, product, user, search, reviews, categories, chat
+from .routers import cart, orders, product, user, search, reviews, categories, chat, memories
 from .database import engine
+from .migrations import apply_migrations
 from .utils.chat_maintenance import maintenance_loop
 
 models.Base.metadata.create_all(bind=engine)
+apply_migrations(engine)  # changes to tables that already exist, which create_all leaves alone
 
 
 @asynccontextmanager
@@ -40,6 +42,7 @@ app.include_router(search.router)
 app.include_router(reviews.router)
 app.include_router(categories.router)
 app.include_router(chat.router)
+app.include_router(memories.router)
 
 @app.get("/")
 async def root():

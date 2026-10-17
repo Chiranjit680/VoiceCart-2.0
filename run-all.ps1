@@ -59,7 +59,7 @@ function Get-PortOwner([int]$Port) {
 
 # --- Stop ---
 if ($Stop) {
-    foreach ($port in 8000, 8001, 8002, 8003, 8004, 8080, 5173) {
+    foreach ($port in 8000, 8001, 8002, 8003, 8004, 8005, 8080, 5173) {
         $listeners = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
         if (-not $listeners) { continue }
         foreach ($procId in ($listeners.OwningProcess | Sort-Object -Unique)) {
@@ -103,7 +103,7 @@ $Installed = $false
 function Install-PythonDeps {
     # Windows can't replace files that a running Python still has open, which makes pip fail halfway
     # and leaves the venv incomplete (so the next run would try again).
-    $running = @(8000, 8001, 8002, 8003, 8004) | Where-Object {
+    $running = @(8000, 8001, 8002, 8003, 8004, 8005) | Where-Object {
         $owner = Get-PortOwner $_
         $owner -and $owner.ProcessName -match '^python'
     }
@@ -144,6 +144,12 @@ $Services = @(
     @{ Name = "Product Service"; Port = 8000; Dir = $Root
        Modules = @("fastapi", "uvicorn", "sqlalchemy", "psycopg", "psycopg2", "jose", "passlib", "pydantic_settings", "email_validator", "multipart")
        Command = "& '$Python' -m uvicorn app.main:app --app-dir 'Product Service' --port 8000" },
+    # Long-term memory: judges conversations in the background and answers the agent about each shopper's memories.
+    # Needs chromadb, which is never installed automatically (it is large): install it yourself, see Hint.
+    @{ Name = "Memory"; Port = 8005; Dir = $Root; WaitFor = @(8000); NeedsMemoryKey = $true
+       Modules = @("fastapi", "uvicorn", "chromadb", "psycopg", "dotenv", "langchain_openai")
+       Hint = "'chromadb' is not installed automatically. Install it yourself: $Python -m pip install -r longterm_memory/requirements.txt"
+       Command = "& '$Python' -m uvicorn longterm_memory.api:create_app --factory --host 127.0.0.1 --port 8005" },
     @{ Name = "MCP Server"; Port = 8004; Dir = $Root; WaitFor = @(8000)
        Modules = @("mcp", "httpx", "dotenv")
        Command = "`$env:MCP_TRANSPORT = 'streamable-http'; & '$Python' mcp_server/server.py" },
@@ -190,7 +196,9 @@ function Find-MissingPackages {
 
 Find-MissingPackages
 # The repo's own venv is ours to fill in; an explicit -Python is left alone.
-$installable = @($Services | Where-Object { @($_.Missing | Where-Object { $_ -and $_ -ne "gnani" }).Count -gt 0 })
+# Packages the script never installs itself: gnani is not on PyPI, and chromadb is large and left to the user.
+$notAutoInstalled = @("gnani", "chromadb")
+$installable = @($Services | Where-Object { @($_.Missing | Where-Object { $_ -and $_ -notin $notAutoInstalled }).Count -gt 0 })
 if ($installable.Count -gt 0 -and $UsingRepoVenv -and -not $Installed) {
     $detail = ($installable | ForEach-Object { "$($_.Name): $($_.Missing -join ', ')" }) -join "; "
     Write-Host "Some Python packages are missing ($detail)." -ForegroundColor Yellow
@@ -201,8 +209,18 @@ foreach ($svc in $Services) {
     if ($svc.Missing.Count -gt 0) {
         $svc.Skip = $true
         Write-Host "  $($svc.Name): SKIPPED, missing Python packages: $($svc.Missing -join ', ')" -ForegroundColor Red
-        if ($svc.Hint -and $svc.Missing -contains "gnani") { Write-Host "      $($svc.Hint)" -ForegroundColor Red }
+        if ($svc.Hint -and @($svc.Missing | Where-Object { $_ -in $notAutoInstalled }).Count -gt 0) { Write-Host "      $($svc.Hint)" -ForegroundColor Red }
         elseif (-not $UsingRepoVenv) { Write-Host "      Install them into $Python (see each folder's requirements.txt)." -ForegroundColor Red }
+    }
+}
+# The memory service refuses to start without its key (it guards every shopper's memories).
+$envFile = Join-Path $Root ".env"
+$hasMemoryKey = (Test-Path $envFile) -and (Select-String -Path $envFile -Pattern '^\s*MEMORY_SERVICE_KEY\s*=\s*\S' -Quiet)
+foreach ($svc in $Services) {
+    if ($svc.NeedsMemoryKey -and -not $svc.Skip -and -not $hasMemoryKey) {
+        $svc.Skip = $true
+        $svc.SkipReason = "MEMORY_SERVICE_KEY is not set"
+        Write-Host "  $($svc.Name): SKIPPED, MEMORY_SERVICE_KEY is not set in .env (see README)." -ForegroundColor Red
     }
 }
 $skippedPorts = @($Services | Where-Object { $_.Skip } | ForEach-Object { $_.Port })
@@ -233,7 +251,7 @@ foreach ($svc in $Services) {
 Write-Host ""
 foreach ($svc in $Services) {
     if ($svc.Skip) {
-        $state = "SKIPPED (missing packages)"; $color = "Red"
+        $state = if ($svc.SkipReason) { "SKIPPED ($($svc.SkipReason))" } else { "SKIPPED (missing packages)" }; $color = "Red"
     } elseif (Wait-Port $svc.Port 60) {
         $state = "up"; $color = "Green"
     } else {

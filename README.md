@@ -99,13 +99,16 @@ VoiceCart-2.0/
 │   └── stt_new.py
 ├── agent/                    # LangGraph agent service (POST /agent/{user_id})
 │   ├── main.py               # FastAPI wrapper; loads MCP tools per request with the user's JWT
-│   ├── graph.py              # Supervisor + subagent graph, tool assignment per subagent
-│   ├── supervisor.py         # Routing node (structured output)
-│   ├── agents.py             # Tool-calling subagent factory + shopping list node
-│   ├── prompts.py            # Supervisor and subagent prompts
-│   ├── llm.py                # OpenAI-compatible chat model from agent/.env
-│   └── tools/recipes.py      # TheMealDB recipe tools
-├── mcp_server/               # MCP server exposing the backend routes as tools
+│   ├── graph.py              # Wires the nodes: START → memory → supervisor ⇄ specialists → END
+│   ├── nodes/                # One module per graph node
+│   │   ├── memory.py         # First node: fetches the shopper's long-term memories
+│   │   ├── supervisor.py     # Routing node (structured output)
+│   │   ├── product.py  cart.py  order.py  review.py  recipe.py   # Tool-calling specialists: prompt + MCP tool allow-list
+│   │   ├── shopping_list.py  # Builds, confirms and adds shopping lists
+│   │   └── base.py           # The tool-calling loop the specialists share
+│   ├── prompts.py            # Prompt pieces shared by several nodes
+│   ├── cards.py  state.py  trace.py  memory_client.py  llm.py
+├── mcp_server/               # MCP server: every tool the agents can call (store, recipes, show_products)
 │   └── server.py
 ├── packages/src/
 │   ├── Backend/app/          # Core REST API
@@ -227,6 +230,7 @@ Each service can also be run on its own. Typical local ports:
 | Backend REST API | `uvicorn app.main:app --reload` (from `packages/src/Backend`) | 8000 |
 | STT service | `python STT/stt.py` | 8001 |
 | MCP server | `MCP_TRANSPORT=streamable-http python mcp_server/server.py` | 8004 |
+| Memory service (optional) | `uvicorn longterm_memory.api:create_app --factory --host 127.0.0.1 --port 8005` | 8005 |
 | Agent service | `uvicorn agent.main:app --port 8002 --loop agent.loop:selector_loop_factory` (from the repo root) | 8002 |
 | Manager (WebSocket gateway) | `uvicorn main:app --reload --port 8003` (from `manager/`) | 8003 |
 | Frontend | `npm run dev` (from `frontend/`) | 8080 |
@@ -258,6 +262,43 @@ A **session** is one voice conversation: a single WebSocket connection, or a rec
 - Sessions with no activity for `CHAT_IDLE_MINUTES` (default 30) are closed, and sessions older than `CHAT_RETENTION_DAYS` (default 30, `0` disables) are deleted along with their agent state. Set these in the root `.env`.
 - Users can list their sessions (`GET /chat/sessions`), read one with its transcript (`GET /chat/sessions/{id}`) and delete one (`DELETE /chat/sessions/{id}`).
 - Only transcripts are stored: no audio and no login tokens. Spoken details such as addresses are stored as said.
+
+### Agent graph
+
+Each turn runs `START → memory → supervisor`, and the supervisor hands the request to one specialist at a time (`product`, `cart`, `order`, `review`, `recipe`, `shopping_list`). Each specialist reports back to the supervisor, which ends the turn when the request is handled. Every node is its own module in `agent/nodes/`.
+
+- Every tool a specialist can call is served by the MCP server (`mcp_server/server.py`): the store tools, the recipe tools (TheMealDB) and `show_products`, which puts photo cards on the screen. The agent defines no tools of its own.
+- Each specialist lists the MCP tools it may use in its own module. Admin, account and `create_order` tools are given to no agent, and a test fails if a new MCP tool is neither given to an agent nor deliberately withheld. If the MCP server lacks a tool an agent needs, the turn fails with the tool's name instead of the agent quietly working without it; restart the MCP server after adding tools.
+- The `memory` node uses the verified shopper id that the request handler puts in the run's config.
+- Tests (from the repo root): `python -m agent.test_graph`, `python -m agent.test_nodes`, `python -m agent.test_memory_client` and `python mcp_server/test_server.py`.
+
+### Agent trace
+
+Every turn is traced to the agent's console and to `agent/logs/trace.log` (rotated, git-ignored). For each model call it records exactly what the agent was sent (the system prompt, the last-20-message history, tool results) and what it answered (text or tool calls, token counts and timing), plus the supervisor's routing decisions and the final reply and product cards sent to the user. The trace contains conversations and tool output, so treat it as private. Set `AGENT_TRACE=off` in `agent/.env` to turn it off, or `AGENT_TRACE_MAX_CHARS=n` (default 3000) to shorten long messages.
+
+### Long-term memory
+
+The assistant can remember things a shopper has said across conversations ("I'm vegetarian", "I only buy Amul"). It is optional: without it, conversations work exactly as before.
+
+- **Finding memories.** The memory service (`longterm_memory/`) runs a background loop over `chat_turns` rows where `checked = false`. For each thing the shopper said, a model (the one in `agent/.env`) decides whether it is durable personal information. If so, one short sentence is saved to Chroma and the row gets `longterm = true`; every row it has looked at gets `checked = true`. Assistant replies are never memories. A turn the model fails on stays unchecked and is retried. The two columns are added to `chat_turns` by the Product Service when it starts.
+- **Keeping shoppers apart.** Every memory is tagged with its shopper, and all reading and writing goes through one class, `longterm_memory/user_memory.py`, bound to a single shopper. It always filters by that shopper, prefixes each memory's id with the shopper's id, and drops anything that is not theirs. The shopper's id comes from the database (when saving) or from the Product Service's verified login (when the agent reads); the `{user_id}` in the agent's URL is never used for it.
+- **One process owns Chroma.** A persistent Chroma folder belongs to one process, so the memory service is the only one that opens it (`LONGTERM_MEMORY_DIR`, default `longterm_memory/chroma_data/`, git-ignored). The agent and the Product Service reach memories over HTTP with a shared secret.
+- **Using memories.** At the start of each turn the agent asks the service for the shopper's five most relevant memories and gives them to the specialist agents as background, labelled as the shopper's own words, never as instructions or as a source of prices or permissions. If the service is off or slow, the turn simply has no memories.
+- **Shopper controls.** `GET /memories`, `DELETE /memories/{id}` and `DELETE /memories` on the Product Service list, delete one, or forget all of the logged-in shopper's memories. Deleting a conversation does not delete what was learned from it.
+
+Setup:
+
+1. Install Chroma into the project venv (it is large and is never installed automatically): `.venv/Scripts/python.exe -m pip install -r longterm_memory/requirements.txt`. The first use also downloads a small embedding model.
+2. Put a secret in the root `.env`: `MEMORY_SERVICE_KEY=<random>`. Generate one with `python -c "import secrets; print(secrets.token_urlsafe(32))"`. The Product Service, the agent and the memory service all read it from there. `MEMORY_SERVICE_URL` (default `http://127.0.0.1:8005`) is optional.
+3. Start the Product Service once so it adds the columns, then run `run-all.ps1` (it starts the memory service when Chroma and the key are present, and skips it with a reason otherwise).
+
+Useful commands, from the repo root:
+
+- `python -m longterm_memory.memory --dry-run --limit 20` shows what the model would remember from unchecked turns, without saving or flagging anything (it needs neither Chroma nor the key).
+- `python -m longterm_memory.memory --once` processes one batch. Tuning: `MEMORY_POLL_SECONDS` (60), `MEMORY_BATCH_SIZE` (20), `MEMORY_CONTEXT_TURNS` (4).
+- Tests: `python -m longterm_memory.test_memory`, `python -m longterm_memory.test_user_memory`, `python -m longterm_memory.test_api`, `python -m agent.test_memory_client` and `python "Product Service/test_memories_routes.py"`. The ones that use real Chroma are skipped until it is installed.
+
+Existing turns start as unchecked, so the first run goes through the whole backlog. The memory text is the shopper's own words processed by a model, so the Chroma folder contains personal data.
 
 ## Project Status
 

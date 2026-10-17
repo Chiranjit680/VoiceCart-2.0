@@ -17,7 +17,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import httpx
 from dotenv import dotenv_values
@@ -31,6 +31,7 @@ from pydantic import BaseModel
 
 from . import llm  # noqa: F401  (loads agent/.env)
 from .graph import build_graph
+from .trace import new_turn_trace
 
 ROOT_ENV = Path(__file__).resolve().parent.parent / ".env"
 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://127.0.0.1:8004/mcp")
@@ -73,8 +74,13 @@ class AgentRequest(BaseModel):
     msg: str
 
 
-async def check_session(session_id: str, authorization: str) -> Optional[str]:
-    """Ask the Product Service whether this token owns the session. Returns a sentence to speak if not."""
+async def check_session(session_id: str, authorization: str) -> Tuple[Optional[int], Optional[str]]:
+    """Ask the Product Service whether this token owns the session.
+
+    Returns (verified user id, None) when it does, or (None, a sentence to speak) when it does not. The id comes
+    from the Product Service, which has checked the login; the `{user_id}` in the agent's URL has not been checked
+    by anyone, so nothing that scopes a shopper's data may use it.
+    """
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.get(
@@ -82,15 +88,19 @@ async def check_session(session_id: str, authorization: str) -> Optional[str]:
             )
     except httpx.HTTPError:
         logger.exception("Product Service unreachable")
-        return "Sorry, the store is not reachable right now. Please try again in a moment."
+        return None, "Sorry, the store is not reachable right now. Please try again in a moment."
     if response.status_code == 401:
-        return "Your login has expired. Please log in again."
+        return None, "Your login has expired. Please log in again."
     if response.status_code == 404:
-        return "That conversation is no longer available. Please reconnect."
+        return None, "That conversation is no longer available. Please reconnect."
     if response.status_code >= 400:
         logger.error("Session check failed: %s %s", response.status_code, response.text[:200])
-        return "Sorry, something went wrong on my side. Please try again."
-    return None
+        return None, "Sorry, something went wrong on my side. Please try again."
+    verified = response.json().get("user_id")
+    if not isinstance(verified, int):  # an older Product Service that does not report the owner
+        logger.warning("The session check did not return a user id; long-term memory is off for this turn")
+        verified = None
+    return verified, None
 
 
 async def save_turns(session_id: str, authorization: str, turns: List[dict]) -> None:
@@ -118,25 +128,35 @@ async def run_agent(
     if not authorization or not authorization.lower().startswith("bearer "):
         return {"response": "Please log in first so I can help with your shopping."}
 
-    problem = await check_session(x_session_id, authorization)
+    verified_user_id, problem = await check_session(x_session_id, authorization)
     if problem:
         return {"response": problem}
+    if verified_user_id is not None and str(verified_user_id) != user_id:
+        logger.warning("The URL says user %s but the login is user %s; using the login", user_id, verified_user_id)
+    # The graph's first node fetches this shopper's long-term memories. It is given the VERIFIED id, and nothing
+    # below uses the URL's user id for data.
 
     client = MultiServerMCPClient(
         {"voicecart": {"transport": "streamable_http", "url": MCP_SERVER_URL, "headers": {"Authorization": authorization}}}
     )
     # The session id is the thread: every connection starts fresh, a quick reconnect continues it.
-    config = {"configurable": {"thread_id": x_session_id}, "recursion_limit": 40}
+    config = {"configurable": {"thread_id": x_session_id, "user_id": verified_user_id}, "recursion_limit": 40}
     user_turn = {"role": "user", "content": body.msg}
+    trace = new_turn_trace(x_session_id)  # None when AGENT_TRACE=off
 
     try:
-        graph = build_graph(await client.get_tools(), request.app.state.checkpointer)
-        before = len((await graph.aget_state(config)).values.get("messages", []))
+        graph = build_graph(await client.get_tools(), request.app.state.checkpointer, trace)
+        earlier = (await graph.aget_state(config)).values.get("messages", [])
+        before = len(earlier)
+        if trace:
+            trace.start(str(verified_user_id or user_id), sum(isinstance(m, HumanMessage) for m in earlier) + 1, body.msg)
         result = await graph.ainvoke(
             {"messages": [HumanMessage(body.msg)], "hops": 0, "visited": [], "products": []}, config
         )
-    except Exception:
+    except Exception as error:
         logger.exception("Agent run failed for user %s", user_id)
+        if trace:
+            trace.fail(f"{type(error).__name__}: {error}")
         apology = "Sorry, something went wrong on my side. Please try again."
         await save_turns(x_session_id, authorization, [user_turn, {"role": "assistant", "content": apology}])
         return {"response": apology}
@@ -155,7 +175,10 @@ async def run_agent(
         if replies
         else [user_turn, {"role": "assistant", "content": response}],
     )
-    return {"response": response, "products": result.get("products", [])}
+    products = result.get("products", [])
+    if trace:
+        trace.finish(response, products)
+    return {"response": response, "products": products}
 
 
 if __name__ == "__main__":

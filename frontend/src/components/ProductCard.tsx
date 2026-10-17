@@ -17,7 +17,10 @@ export function ProductCard({ product, className }: { product: ProductCardData; 
   return (
     <article
       aria-label={product.name}
-      className={cn("flex w-44 shrink-0 snap-start flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm", className)}
+      className={cn(
+        "group flex w-44 shrink-0 snap-start flex-col overflow-hidden rounded-xl border border-border/80 bg-card shadow-sm ring-1 ring-transparent transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:ring-primary/10 hover:shadow-md",
+        className
+      )}
     >
       <div className="relative">
         <ProductImage

@@ -72,7 +72,7 @@ def session_status(
 ):
     """Cheap ownership check the agent runs before spending model tokens on a request."""
     session = _own_session(db, session_id, current_user)
-    return schemas.ChatSessionStatus(id=session.id, ended=session.ended_at is not None)
+    return schemas.ChatSessionStatus(id=session.id, ended=session.ended_at is not None, user_id=session.user_id)
 
 
 @router.post("/sessions/{session_id}/turns", status_code=status.HTTP_204_NO_CONTENT)

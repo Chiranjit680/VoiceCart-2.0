@@ -170,7 +170,12 @@ class ChatSession(Base):
 class ChatTurn(Base):
     """One message in a session: what the user said, or what an agent replied."""
     __tablename__ = "chat_turns"
-    __table_args__ = (UniqueConstraint("session_id", "seq", name="uq_chat_turns_session_seq"),)
+    __table_args__ = (
+        UniqueConstraint("session_id", "seq", name="uq_chat_turns_session_seq"),
+        # Lets the memory service find unchecked turns without scanning the whole table.
+        # Keep in step with app/migrations.py, which adds the same index to databases that already have the table.
+        Index("ix_chat_turns_unchecked", "id", postgresql_where=text("checked = false")),
+    )
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     session_id = Column(String(36), ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -179,6 +184,10 @@ class ChatTurn(Base):
     agent = Column(String, nullable=True)  # which subagent replied: product, cart, order, ...
     content = Column(Text, nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=text('now()'), nullable=False)
+
+    # Written by the long-term memory service (longterm_memory/), not by the API:
+    checked = Column(Boolean, nullable=False, default=False, server_default=text("false"))  # the service has looked at this turn
+    longterm = Column(Boolean, nullable=False, default=False, server_default=text("false"))  # and saved it to long-term memory
 
     session = relationship("ChatSession", back_populates="turns")
 

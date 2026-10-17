@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
@@ -11,6 +13,10 @@ class Settings(BaseSettings):
     database_password: str
     database_name: str
     GEMINI_API_KEY: str
+
+    # Long-term memory service (longterm_memory/). Without a key, the /memories routes answer 503.
+    memory_service_url: str = "http://127.0.0.1:8005"
+    memory_service_key: Optional[str] = None
 
     # Voice chat sessions (see routers/chat.py)
     chat_resume_minutes: int = 10  # reconnecting this soon after a disconnect continues the same conversation

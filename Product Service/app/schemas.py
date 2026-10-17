@@ -212,6 +212,7 @@ class ChatSessionOpened(BaseModel):
 class ChatSessionStatus(BaseModel):
     id: str
     ended: bool
+    user_id: int  # the verified owner; the agent scopes long-term memory by this, not by what a URL says
 
 class ChatSessionEnd(BaseModel):
     reason: Literal["disconnect", "idle"] = "disconnect"

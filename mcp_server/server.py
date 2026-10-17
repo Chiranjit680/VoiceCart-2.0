@@ -353,5 +353,76 @@ async def delete_review(review_id: int) -> Dict[str, Any]:
     return await _request("DELETE", f"/reviews/{review_id}", auth=True)
 
 
+# --- Recipes (TheMealDB's free public API: no login needed) ---
+
+MEALDB_URL = "https://www.themealdb.com/api/json/v1/1"
+
+
+async def _mealdb(endpoint: str, params: Dict[str, str]) -> List[Dict[str, Any]]:
+    async with httpx.AsyncClient(base_url=MEALDB_URL, timeout=15.0) as client:
+        response = await client.get(endpoint, params=params)
+    response.raise_for_status()
+    # TheMealDB answers {"meals": null} when nothing matches.
+    return response.json().get("meals") or []
+
+
+def _meal_summary(meal: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "meal_id": meal["idMeal"],
+        "name": meal["strMeal"],
+        "category": meal.get("strCategory"),
+        "cuisine": meal.get("strArea"),
+    }
+
+
+@mcp.tool()
+async def search_recipes(query: str) -> List[Dict[str, Any]]:
+    """Search recipes by dish name, e.g. "chicken curry" or "lasagne". Use one or two keywords, not a sentence."""
+    meals = await _mealdb("search.php", {"s": query})
+    return [_meal_summary(m) for m in meals[:5]] or [{"message": f"No recipes found for '{query}'."}]
+
+
+@mcp.tool()
+async def recipes_by_ingredient(ingredient: str) -> List[Dict[str, Any]]:
+    """Find recipes that use a main ingredient, e.g. "chicken_breast" or "salmon" (use underscores for spaces)."""
+    meals = await _mealdb("filter.php", {"i": ingredient.replace(" ", "_")})
+    found = [{"meal_id": m["idMeal"], "name": m["strMeal"]} for m in meals[:8]]
+    return found or [{"message": f"No recipes found with '{ingredient}'."}]
+
+
+@mcp.tool()
+async def get_recipe(meal_id: str) -> Dict[str, Any]:
+    """Get a recipe's full ingredient list (with measures) and instructions by its meal_id."""
+    meals = await _mealdb("lookup.php", {"i": meal_id})
+    if not meals:
+        return {"message": f"No recipe with id {meal_id}."}
+    meal = meals[0]
+    ingredients = []
+    for i in range(1, 21):
+        name = (meal.get(f"strIngredient{i}") or "").strip()
+        if name:
+            measure = (meal.get(f"strMeasure{i}") or "").strip()
+            ingredients.append(f"{measure} {name}".strip())
+    return {
+        **_meal_summary(meal),
+        "ingredients": ingredients,
+        "instructions": (meal.get("strInstructions") or "")[:1500],
+    }
+
+
+# --- Display ---
+
+@mcp.tool()
+def show_products(product_ids: List[int]) -> str:
+    """Show photo cards on the user's screen for products you are recommending or asking them to choose between.
+
+    Call it once, after you have found products, with the ids of up to 5 of them, best match first.
+    Only include products that really answer the request; never show unrelated search results.
+
+    The tool only acknowledges the request: the agent reads the ids from the call and sends the cards to the screen.
+    """
+    return f"Showing {min(len(product_ids), 5)} product card(s) on the user's screen."
+
+
 if __name__ == "__main__":
     mcp.run(transport=os.getenv("MCP_TRANSPORT", "stdio"))

@@ -21,6 +21,8 @@ class AgentState(MessagesState):
     task: str
     # Raw tool output from the last subagent step, so later steps can resolve "that one".
     scratch: str
+    # What this shopper told us in earlier conversations (from the memory service), fetched at the start of each turn.
+    memories: List[str]
     # Product cards the reply should show, rebuilt every turn (see cards.py).
     products: List[dict]
     # Shopping list waiting for the user to confirm, change or cancel.
