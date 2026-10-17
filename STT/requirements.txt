@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+python-dotenv
+python-multipart
+# Also needed (not installable from PyPI under a known name, so install it yourself): the Gnani STT SDK
+# that provides `gnani.stt.GnaniSTTClient`, and ffmpeg on PATH.

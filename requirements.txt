@@ -45,6 +45,7 @@ redis
 sqlalchemy
 alembic
 psycopg2-binary
+psycopg[binary]  # SQLAlchemy 2.1+ uses psycopg 3 for postgresql:// URLs
 
 # Authentication / security
 python-jose[cryptography]
