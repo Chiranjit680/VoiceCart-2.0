@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from . import models
-from .routers import cart, orders, product, user, search, reviews, categories, chat, memories
+from .routers import cart, orders, product, user, search, reviews, categories, chat, memories, profile
 from .database import engine
 from .migrations import apply_migrations
 from .utils.chat_maintenance import maintenance_loop
@@ -43,6 +43,7 @@ app.include_router(reviews.router)
 app.include_router(categories.router)
 app.include_router(chat.router)
 app.include_router(memories.router)
+app.include_router(profile.router)
 
 @app.get("/")
 async def root():

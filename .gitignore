@@ -208,3 +208,4 @@ __marimo__/
 
 # Long-term memory database (personal data)
 longterm_memory/chroma_data/
+evals/results/

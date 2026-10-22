@@ -23,6 +23,7 @@ import httpx
 from dotenv import dotenv_values
 from fastapi import FastAPI, Header, Request
 from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.tracers.langchain import wait_for_all_tracers
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.rows import dict_row
@@ -31,6 +32,7 @@ from pydantic import BaseModel
 
 from . import llm  # noqa: F401  (loads agent/.env)
 from .graph import build_graph
+from .profile_client import fetch_profile
 from .trace import new_turn_trace
 
 ROOT_ENV = Path(__file__).resolve().parent.parent / ".env"
@@ -65,6 +67,7 @@ async def lifespan(app: FastAPI):
     logger.info("Conversation store ready (Postgres)")
     yield
     await pool.close()
+    wait_for_all_tracers()  # send any LangSmith traces still waiting in the background
 
 
 app = FastAPI(lifespan=lifespan)
@@ -146,12 +149,25 @@ async def run_agent(
 
     try:
         graph = build_graph(await client.get_tools(), request.app.state.checkpointer, trace)
-        earlier = (await graph.aget_state(config)).values.get("messages", [])
+        saved = (await graph.aget_state(config)).values
+        earlier = saved.get("messages", [])
         before = len(earlier)
+        # The shopper's profile is read once, at the start of the conversation, and then lives in the checkpointed
+        # state. None means "not fetched yet" (also after a failed fetch, so the next turn tries again).
+        profile_input = {}
+        if saved.get("profile") is None:
+            profile = await fetch_profile(authorization)
+            if profile is not None:
+                profile_input = {"profile": profile}
+        turn_number = sum(isinstance(m, HumanMessage) for m in earlier) + 1
         if trace:
-            trace.start(str(verified_user_id or user_id), sum(isinstance(m, HumanMessage) for m in earlier) + 1, body.msg)
+            trace.start(str(verified_user_id or user_id), turn_number, body.msg)
         result = await graph.ainvoke(
-            {"messages": [HumanMessage(body.msg)], "hops": 0, "visited": [], "products": []}, config
+            {"messages": [HumanMessage(body.msg)], "hops": 0, "visited": [], "products": [], **profile_input},
+            # What LangSmith shows (when LANGSMITH_TRACING is on): one named trace per turn, grouped into a
+            # thread by session (`thread_id` comes from the config above), filterable by shopper and turn.
+            {**config, "run_name": "voicecart_turn", "tags": ["voicecart"],
+             "metadata": {"turn": turn_number, **({"user_id": verified_user_id} if verified_user_id is not None else {})}},
         )
     except Exception as error:
         logger.exception("Agent run failed for user %s", user_id)

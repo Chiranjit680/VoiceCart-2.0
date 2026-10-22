@@ -7,6 +7,8 @@ interface UseHandsFreeOptions {
   /** Called with the recorded audio (WebM/Opus) once an utterance has ended. */
   onSegment: (blob: Blob) => void;
   vad?: Partial<SpeechDetectorConfig>;
+  /** While true the microphone stays open but nothing is detected or recorded (e.g. while a reply is being spoken). */
+  paused?: boolean;
 }
 
 const FRAME_MS = 30;
@@ -15,13 +17,15 @@ const FRAME_MS = 30;
  * Hands-free recording: keeps the microphone open and records an utterance automatically,
  * starting when the voice activity detector hears speech and stopping after it falls silent.
  */
-export function useHandsFree({ onSegment, vad }: UseHandsFreeOptions) {
+export function useHandsFree({ onSegment, vad, paused = false }: UseHandsFreeOptions) {
   const [state, setState] = useState<HandsFreeState>("off");
   const [level, setLevel] = useState(0); // 0..1, for a level meter
   const onSegmentRef = useRef(onSegment);
   onSegmentRef.current = onSegment;
   const vadRef = useRef(vad);
   vadRef.current = vad;
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
   const teardownRef = useRef<(() => void) | null>(null);
 
   const stop = useCallback(() => {
@@ -71,6 +75,14 @@ export function useHandsFree({ onSegment, vad }: UseHandsFreeOptions) {
 
     let frame = 0;
     const timer = setInterval(() => {
+      if (pausedRef.current) {
+        // Our own speaker would otherwise be heard as the shopper talking.
+        endRecording(false);
+        detector.reset();
+        setState("listening");
+        setLevel(0);
+        return;
+      }
       analyser.getFloatTimeDomainData(samples);
       let sum = 0;
       for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];

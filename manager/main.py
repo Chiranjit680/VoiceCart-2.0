@@ -10,6 +10,8 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 STT_URL = os.getenv("STT_SERVICE_URL")
 AGENT_BASE_URL = os.getenv("AGENT_BASE_URL", "http://localhost:8002").rstrip("/")
 PRODUCT_SERVICE_URL = os.getenv("PRODUCT_SERVICE_URL", "http://localhost:8000").rstrip("/")
+TTS_URL = os.getenv("TTS_SERVICE_URL")  # e.g. http://localhost:8006/speak; unset means replies are not spoken
+TTS_TIMEOUT = float(os.getenv("TTS_TIMEOUT", "25"))
 
 # WebSocket close code meaning "log in again"; the frontend does not retry on it.
 CLOSE_AUTH_FAILED = 4401
@@ -20,6 +22,7 @@ app = FastAPI()
 # The conversation itself is JSON:
 #   {"type": "transcript", "text": "what the user said"}
 #   {"type": "reply", "text": "what the assistant says", "products": [product cards with photos]}
+#   {"type": "audio", "mime": "audio/wav", "data": "<base64>"}   the last reply, spoken (only when TTS is on)
 
 
 def user_id_from_token(token: str):
@@ -59,6 +62,21 @@ async def end_session(token: str, session_id: str):
             )
     except Exception as e:
         print(f"Could not end chat session {session_id}: {e}")
+
+
+async def synthesize_reply(client: httpx.AsyncClient, text: str):
+    """WAV bytes of the reply from the TTS service, or None (speech off, nothing to say, or the service failed)."""
+    if not TTS_URL or not text.strip():
+        return None
+    try:
+        response = await client.post(TTS_URL, json={"text": text}, timeout=TTS_TIMEOUT)
+        if response.status_code == 200:
+            return response.content
+        if response.status_code != 204:
+            print(f"TTS answered {response.status_code}")
+    except httpx.HTTPError as e:
+        print(f"TTS unavailable: {type(e).__name__}")
+    return None
 
 
 @app.websocket("/ws")
@@ -164,6 +182,13 @@ async def websocket_endpoint(websocket: WebSocket):
 
                     # 3. Return the reply and the product cards to show with it
                     await websocket.send_text(json.dumps({"type": "reply", "text": agent_reply, "products": agent_products}))
+
+                    # 4. Speak it. The text is already on screen, so a speech failure only costs the voice.
+                    wav = await synthesize_reply(client, agent_reply)
+                    if wav:
+                        await websocket.send_text(json.dumps({
+                            "type": "audio", "mime": "audio/wav", "data": base64.b64encode(wav).decode("ascii"),
+                        }))
 
         except WebSocketDisconnect:
             print("Client disconnected")

@@ -7,6 +7,8 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { AppLayout } from "@/components/AppLayout";
 import AuthPage from "@/pages/AuthPage";
 import OrdersPage from "@/pages/OrdersPage";
+import ProfilePage from "@/pages/ProfilePage";
+import CataloguePage from "@/pages/CataloguePage";
 import VoicePage from "@/pages/VoicePage";
 import NotFound from "@/pages/NotFound";
 
@@ -23,7 +25,9 @@ const App = () => (
             <Route path="/auth" element={<AuthPage />} />
             <Route element={<AppLayout />}>
               <Route path="/" element={<VoicePage />} />
+              <Route path="/catalogue" element={<CataloguePage />} />
               <Route path="/orders" element={<OrdersPage />} />
+              <Route path="/profile" element={<ProfilePage />} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>

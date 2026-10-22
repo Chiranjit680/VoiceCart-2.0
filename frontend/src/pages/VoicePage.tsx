@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useWebSocket, type ConnectionStatus } from "@/hooks/useWebSocket";
 import { useVoiceRecorder } from "@/hooks/useVoiceRecorder";
 import { useHandsFree } from "@/hooks/useHandsFree";
+import { useSpeech } from "@/hooks/useSpeech";
 import { useAuth } from "@/contexts/AuthContext";
 import { RecordButton } from "@/components/RecordButton";
 import { ConnectionIndicator } from "@/components/ConnectionIndicator";
@@ -30,6 +31,8 @@ function now() {
 }
 
 export default function VoicePage() {
+  const speech = useSpeech();
+  const { play: playSpeech, stop: stopSpeech } = speech;
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [items, setItems] = useState<ConversationItem[]>([]);
   // Requests sent and not yet answered. A count, not a flag: a second request can start before the first is answered.
@@ -50,7 +53,10 @@ export default function VoicePage() {
     (raw: string) => {
       const message = parseServerMessage(raw);
       if (message.type === "transcript") {
+        stopSpeech(); // the shopper is talking again; stop reading the last answer
         addItem({ role: "user", text: message.text }); // still waiting for the reply
+      } else if (message.type === "audio") {
+        playSpeech(message.mime, message.data);
       } else if (message.type === "reply") {
         addItem({ role: "assistant", text: message.text, products: message.products });
         requestFinished();
@@ -59,7 +65,7 @@ export default function VoicePage() {
         requestFinished();
       }
     },
-    [addItem, requestFinished]
+    [addItem, requestFinished, playSpeech, stopSpeech]
   );
 
   const { status, connect, disconnect, sendBlob, sendText } = useWebSocket(handleServerMessage);
@@ -127,7 +133,7 @@ export default function VoicePage() {
     },
     [sendBlob, sendText, requestStarted, addLog]
   );
-  const handsFree = useHandsFree({ onSegment: handleSegment });
+  const handsFree = useHandsFree({ onSegment: handleSegment, paused: speech.speaking });
   const { stop: stopHandsFree } = handsFree;
 
   // The connection can also drop on its own; don't keep the microphone open for nothing.
@@ -169,7 +175,14 @@ export default function VoicePage() {
     <div className="mx-auto flex h-[calc(100vh-3.5rem)] w-full max-w-3xl flex-col">
       <div className="flex items-center justify-between gap-4 border-b border-border px-4 py-3">
         <ConnectionIndicator status={status} />
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+          <div className="flex items-center gap-2">
+            <Switch id="speak-replies" checked={speech.enabled} onCheckedChange={speech.setEnabled} />
+            <Label htmlFor="speak-replies" className="text-muted-foreground">
+              Speak replies
+            </Label>
+          </div>
+          <div className="flex items-center gap-2">
           <Switch
             id="hands-free"
             checked={handsFree.isActive}
@@ -179,6 +192,7 @@ export default function VoicePage() {
           <Label htmlFor="hands-free" className="text-muted-foreground">
             Hands-free (auto-detect speech)
           </Label>
+          </div>
         </div>
       </div>
 

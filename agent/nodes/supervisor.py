@@ -11,6 +11,7 @@ from langgraph.graph import END
 from langgraph.types import Command
 from pydantic import BaseModel, Field
 
+from ..prompts import memory_block, profile_block
 from ..state import AgentState, recent
 from ..trace import note as trace_note
 from .shopping_list import describe_list
@@ -40,12 +41,18 @@ Rules:
 - Adding, changing or removing cart items always goes to cart, even when the product still has to be found; cart can search.
 - For greetings, thanks or anything outside shopping, choose FINISH and put a short friendly spoken answer in `reply`. Otherwise leave `reply` empty.
 - `task` is a one-sentence instruction for the specialist with the concrete details it needs (product names, quantities, address) taken from the conversation.
-{pending}"""
+- When you answer directly, you may use what is known about the shopper (shown below, when there is any), for example if they ask what you know about them. Say only what is written there.
+{pending}{shopper}"""
 
 PENDING_LIST_NOTE = """
 A shopping list is waiting for the user's confirmation:
 {items}
 If the latest user message confirms, changes or cancels this list, route to shopping_list."""
+
+
+def shopper_context(state: AgentState) -> str:
+    """Long-term memories and the shopper's profile, framed as background (same wording the specialists get)."""
+    return memory_block(state.get("memories")) + profile_block(state.get("profile"))
 
 
 class Route(BaseModel):
@@ -68,7 +75,8 @@ def make_supervisor_node(llm: BaseChatModel):
         pending = state.get("pending_list")
         pending_note = PENDING_LIST_NOTE.format(items=describe_list(pending)) if pending else ""
         route: Route = await router.ainvoke(
-            [SystemMessage(PROMPT.format(pending=pending_note)), *recent(state["messages"])], config
+            [SystemMessage(PROMPT.format(pending=pending_note, shopper=shopper_context(state))), *recent(state["messages"])],
+            config,
         )
 
         visited = state.get("visited") or []

@@ -358,12 +358,27 @@ async def delete_review(review_id: int) -> Dict[str, Any]:
 MEALDB_URL = "https://www.themealdb.com/api/json/v1/1"
 
 
+MEALDB_TIMEOUT = 8.0  # seconds per attempt; the free service is sometimes slow, and a shopper is waiting
+MEALDB_ATTEMPTS = 2
+
+
 async def _mealdb(endpoint: str, params: Dict[str, str]) -> List[Dict[str, Any]]:
-    async with httpx.AsyncClient(base_url=MEALDB_URL, timeout=15.0) as client:
-        response = await client.get(endpoint, params=params)
-    response.raise_for_status()
-    # TheMealDB answers {"meals": null} when nothing matches.
-    return response.json().get("meals") or []
+    """One TheMealDB lookup. Timeouts, dropped connections and 5xx answers are tried once more; if it still
+    fails, the error says so in words the agent can pass on (an exception with an empty message tells it nothing)."""
+    for attempt in range(MEALDB_ATTEMPTS):
+        try:
+            async with httpx.AsyncClient(base_url=MEALDB_URL, timeout=MEALDB_TIMEOUT) as client:
+                response = await client.get(endpoint, params=params)
+            if response.status_code >= 500:
+                raise httpx.HTTPError(f"server error {response.status_code}")
+            if response.status_code >= 400:
+                raise RuntimeError(f"The recipe service (TheMealDB) refused the request ({response.status_code}).")
+            # TheMealDB answers {"meals": null} when nothing matches.
+            return response.json().get("meals") or []
+        except httpx.HTTPError:  # timeouts, dropped connections, 5xx: worth another try
+            if attempt + 1 < MEALDB_ATTEMPTS:
+                continue
+    raise RuntimeError("The recipe service (TheMealDB) is not answering right now. Try again in a moment.")
 
 
 def _meal_summary(meal: Dict[str, Any]) -> Dict[str, Any]:

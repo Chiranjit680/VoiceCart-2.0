@@ -18,7 +18,7 @@ from langchain_core.tools import StructuredTool
 from langgraph.checkpoint.memory import InMemorySaver
 
 from . import graph as graph_module
-from .nodes import base, memory
+from .nodes import memory
 from .nodes.supervisor import SPECIALIST_NAMES, Route
 
 SERVER_FILE = Path(__file__).resolve().parent.parent / "mcp_server" / "server.py"
@@ -59,6 +59,20 @@ class ScriptedLLM:
     def __init__(self, *routes):
         self.routes = list(routes)
 
+    answer = "Here you go."
+    system_prompts = None  # set by patched_graph_parts to record what each specialist was told
+
+    def bind_tools(self, tools):
+        outer = self
+
+        class Answering:
+            async def ainvoke(self, messages, config=None):
+                if outer.system_prompts is not None:
+                    outer.system_prompts.append(messages[0].content)
+                return AIMessage(outer.answer)
+
+        return Answering()
+
     def with_structured_output(self, schema, method=None):
         outer = self
 
@@ -70,32 +84,25 @@ class ScriptedLLM:
 
 
 class patched_graph_parts:
-    """Gives build_graph a scripted model, and tool-agents that answer without any model."""
+    """Gives build_graph a scripted model (which also answers for the tool-calling specialists) and a stand-in memory lookup."""
 
     def __init__(self, llm, answer="Here you go."):
         self.llm, self.answer, self.system_prompts = llm, answer, []
 
     def __enter__(self):
-        self.saved = (graph_module.get_llm, base.create_agent, memory.recall)
+        self.saved = (graph_module.get_llm, memory.recall)
         outer = self
-
-        def fake_create(llm, tools):
-            class Agent:
-                async def ainvoke(self, payload, config=None):
-                    outer.system_prompts.append(payload["messages"][0].content)
-                    return {"messages": [*payload["messages"], AIMessage(outer.answer)]}
-
-            return Agent()
 
         async def fake_recall(user_id, query, **kw):
             outer.recalled = (user_id, query)
             return ["Is vegetarian."]
 
-        graph_module.get_llm, base.create_agent, memory.recall = (lambda: self.llm), fake_create, fake_recall
+        self.llm.answer, self.llm.system_prompts = self.answer, self.system_prompts
+        graph_module.get_llm, memory.recall = (lambda: self.llm), fake_recall
         return self
 
     def __exit__(self, *exc):
-        graph_module.get_llm, base.create_agent, memory.recall = self.saved
+        graph_module.get_llm, memory.recall = self.saved
 
 
 def build(llm=None):

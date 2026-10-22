@@ -23,6 +23,9 @@ class AgentState(MessagesState):
     scratch: str
     # What this shopper told us in earlier conversations (from the memory service), fetched at the start of each turn.
     memories: List[str]
+    # What the shopper entered in their own profile (age, preferences, medical conditions), as a short paragraph.
+    # Fetched once at the start of the conversation: None = not fetched yet, "" = fetched and empty.
+    profile: Optional[str]
     # Product cards the reply should show, rebuilt every turn (see cards.py).
     products: List[dict]
     # Shopping list waiting for the user to confirm, change or cancel.

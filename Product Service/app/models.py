@@ -331,3 +331,15 @@ class ChatTurn(Base):
 # #     requires_feedback = Column(Boolean, default=False)
 # #     conversation_id = Column(String, nullable=False)
 # #     conversation_ended = Column(Boolean, default=False)
+
+
+class UserProfile(Base):
+    """What a shopper chose to tell us about themselves. One row per user, kept apart from the account itself
+    because it is personal (health) information: it is only ever read or written by the shopper it belongs to."""
+    __tablename__ = "user_profiles"
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    age = Column(Integer, nullable=True)
+    preferences = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))  # list of short strings
+    medical_conditions = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))  # list of short strings
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=text('now()'), nullable=False)

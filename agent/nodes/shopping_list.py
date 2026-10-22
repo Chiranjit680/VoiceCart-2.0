@@ -17,7 +17,7 @@ from langgraph.types import Command
 from pydantic import BaseModel, Field
 
 from ..cards import card_from, merge_cards
-from ..prompts import memory_block
+from ..prompts import memory_block, profile_block
 from ..state import AgentState, ListItem, recent
 from ..toolresult import parse
 from .base import Node, Specialist, log_agent_input
@@ -127,7 +127,7 @@ def build(llm: BaseChatModel, tools: Dict[str, BaseTool]) -> Node:
             current=current_note,
             task=state.get("task") or "Build a shopping list for the user's request.",
             scratch=state.get("scratch") or "none",
-            memories=memory_block(state.get("memories")),
+            memories=memory_block(state.get("memories")) + profile_block(state.get("profile")),
         )
         messages = [SystemMessage(system), *recent(state["messages"])]
         log_agent_input("shopping_list.drafter", messages)

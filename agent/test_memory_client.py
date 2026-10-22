@@ -151,8 +151,11 @@ def drive(verified_user, url_user="2", problem=None):
     async def fake_save(*args, **kw):
         return None
 
-    saved = {name: getattr(agent_main, name) for name in ("check_session", "save_turns", "build_graph", "MultiServerMCPClient", "new_turn_trace")}
-    agent_main.check_session, agent_main.save_turns = fake_check, fake_save
+    async def fake_profile(authorization):
+        return ""  # these tests are about memory; do not call the live Product Service
+
+    saved = {name: getattr(agent_main, name) for name in ("check_session", "save_turns", "build_graph", "MultiServerMCPClient", "new_turn_trace", "fetch_profile")}
+    agent_main.check_session, agent_main.save_turns, agent_main.fetch_profile = fake_check, fake_save, fake_profile
     agent_main.build_graph, agent_main.MultiServerMCPClient = (lambda tools, saver, trace=None: graph), FakeMcp
     agent_main.new_turn_trace = lambda session_id: None
     try:

@@ -1,6 +1,6 @@
 # Removed from the web app
 
-VoiceCart is voice first, so the web app now has only the Voice page and the Orders page.
+VoiceCart is voice first, so the web app has the Voice page, a read-only Catalogue and the Orders page.
 These pages and components were moved here (not deleted) so nothing is lost. They sit outside
 `src/`, so they are not built or type-checked. Delete this folder whenever you like.
 

@@ -126,13 +126,54 @@ def test_recipe_tools_need_no_login():
         server._ensure_token = saved
 
 
-def test_a_failing_recipe_service_is_an_error_the_agent_can_report():
-    with mealdb(lambda r: httpx.Response(503)):
+def test_a_recipe_service_that_keeps_failing_gives_a_clear_error():
+    with mealdb(lambda r: httpx.Response(503)) as api:
         try:
             run(server.search_recipes("apple"))
-        except httpx.HTTPStatusError:
-            return
-    raise AssertionError("a 503 from the recipe service was swallowed")
+        except RuntimeError as error:
+            assert "not answering right now" in str(error) and "TheMealDB" in str(error)
+        else:
+            raise AssertionError("a 503 from the recipe service was swallowed")
+    assert len(api.requests) == server.MEALDB_ATTEMPTS  # tried again once before giving up
+
+
+def test_a_recipe_lookup_that_fails_once_is_tried_again_and_succeeds():
+    attempts = []
+
+    def flaky(request):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise httpx.ConnectTimeout("")  # an exception with no message at all
+        return meals(2)
+
+    with mealdb(flaky):
+        found = run(server.search_recipes("apple"))
+    assert [m["name"] for m in found] == ["Dish 0", "Dish 1"] and len(attempts) == 2
+
+
+def test_dropped_connections_and_timeouts_end_in_the_same_clear_error():
+    for failure in (httpx.ConnectError(""), httpx.ReadTimeout(""), httpx.RemoteProtocolError("")):
+        def always(request, failure=failure):
+            raise failure
+
+        with mealdb(always):
+            try:
+                run(server.get_recipe("1"))
+            except RuntimeError as error:
+                assert "not answering right now" in str(error), failure
+            else:
+                raise AssertionError(f"{failure!r} was swallowed")
+
+
+def test_a_refused_request_is_not_retried():
+    with mealdb(lambda r: httpx.Response(404)) as api:
+        try:
+            run(server.search_recipes("apple"))
+        except RuntimeError as error:
+            assert "refused the request (404)" in str(error)
+        else:
+            raise AssertionError("a 404 was swallowed")
+    assert len(api.requests) == 1
 
 
 def main() -> int:

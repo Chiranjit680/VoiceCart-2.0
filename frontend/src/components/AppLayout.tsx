@@ -1,11 +1,13 @@
 import { Navigate, Outlet, Link, useLocation } from "react-router-dom";
-import { ShoppingCart, ClipboardList, Mic, LogOut } from "lucide-react";
+import { ShoppingCart, ClipboardList, Mic, LogOut, LayoutGrid, UserRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 
 const navItems = [
   { to: "/", label: "Voice", icon: Mic },
+  { to: "/catalogue", label: "Catalogue", icon: LayoutGrid },
   { to: "/orders", label: "Orders", icon: ClipboardList },
+  { to: "/profile", label: "Profile", icon: UserRound },
 ];
 
 /** Top bar plus the page. Everything here needs a login, so visitors without one go to the sign-in page. */
@@ -33,13 +35,15 @@ export function AppLayout() {
                 key={to}
                 to={to}
                 aria-current={active ? "page" : undefined}
+                aria-label={label}
                 className={cn(
                   "flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
                   active ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 )}
               >
                 <Icon className="h-4 w-4" />
-                {label}
+                {/* On a phone only the current tab shows its name, so three tabs and Logout fit across. */}
+                <span className={active ? undefined : "hidden sm:inline"}>{label}</span>
               </Link>
             );
           })}

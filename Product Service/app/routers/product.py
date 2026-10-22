@@ -109,6 +109,7 @@ def get_all_products(
     """
     products = db.query(models.Product)\
         .options(joinedload(models.Product.categories).joinedload(models.ProductCategory.category))\
+        .order_by(models.Product.id)\
         .limit(limit).offset(skip)\
         .all()
     return products

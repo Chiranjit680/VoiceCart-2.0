@@ -30,7 +30,7 @@ without the conversation, for example "Is vegetarian." or "Prefers Amul butter."
 only what the shopper actually said. When in doubt, do not save."""
 
 
-class _Decision(BaseModel):
+class MemoryDecision(BaseModel):
     remember: bool = Field(description="True only if this contains durable personal information worth saving.")
     memory: str = Field(default="", description="The memory as one short sentence about the shopper. Empty if remember is false.")
     kind: Literal["dietary", "preference", "household", "location", "other"] = "other"
@@ -48,11 +48,11 @@ class LLMJudge:
             from agent.llm import get_llm  # same endpoint and settings as the agents; also loads agent/.env
 
             llm = get_llm()
-        self._decide = llm.with_structured_output(_Decision, method="function_calling")
+        self._decide = llm.with_structured_output(MemoryDecision, method="function_calling")
 
     def judge(self, turn: Turn, context: Sequence[Turn]) -> Verdict:
         earlier = "\n".join(f"{_label(t)}: {t.content[:MAX_TURN_CHARS]}" for t in context) or "(nothing)"
-        decision: _Decision = self._decide.invoke(
+        decision: MemoryDecision = self._decide.invoke(
             [
                 SystemMessage(PROMPT),
                 HumanMessage(f"Earlier in the conversation:\n{earlier}\n\nThe shopper just said:\n{turn.content[:MAX_TURN_CHARS]}"),

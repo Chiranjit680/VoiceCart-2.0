@@ -5,7 +5,7 @@
 .DESCRIPTION
     Start order follows the dependencies:
         Product Service (8000) -> MCP server (8004) -> Agent (8002)
-        STT (8001)
+        STT (8001), TTS (8006, optional: without it replies are text only)
         Manager (8003, needs STT + Agent)
         Frontend (8080, or 5173 if 8080 is taken by another program)
 
@@ -59,7 +59,7 @@ function Get-PortOwner([int]$Port) {
 
 # --- Stop ---
 if ($Stop) {
-    foreach ($port in 8000, 8001, 8002, 8003, 8004, 8005, 8080, 5173) {
+    foreach ($port in 8000, 8001, 8002, 8003, 8004, 8005, 8006, 8080, 5173) {
         $listeners = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
         if (-not $listeners) { continue }
         foreach ($procId in ($listeners.OwningProcess | Sort-Object -Unique)) {
@@ -103,7 +103,7 @@ $Installed = $false
 function Install-PythonDeps {
     # Windows can't replace files that a running Python still has open, which makes pip fail halfway
     # and leaves the venv incomplete (so the next run would try again).
-    $running = @(8000, 8001, 8002, 8003, 8004, 8005) | Where-Object {
+    $running = @(8000, 8001, 8002, 8003, 8004, 8005, 8006) | Where-Object {
         $owner = Get-PortOwner $_
         $owner -and $owner.ProcessName -match '^python'
     }
@@ -111,7 +111,7 @@ function Install-PythonDeps {
         throw "Services are still running (ports $($running -join ', ')). Run .\run-all.ps1 -Stop first, then try again."
     }
     Write-Host "Installing Python dependencies into $Python ..." -ForegroundColor Cyan
-    $requirements = @("Product Service", "agent", "mcp_server", "manager", "STT") |
+    $requirements = @("Product Service", "agent", "mcp_server", "manager", "STT", "TTS") |
         ForEach-Object { "-r"; (Join-Path $Root "$_\requirements.txt") }
     & $Python -m pip install @requirements
     if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
@@ -160,6 +160,10 @@ $Services = @(
        Modules = @("fastapi", "uvicorn", "dotenv", "multipart", "gnani")
        Hint = "'gnani' is the Gnani STT SDK; it is not on PyPI under a known name, so install it into $Python yourself."
        Command = "& '$Python' STT/stt_new.py" },
+    @{ Name = "TTS"; Port = 8006; Dir = (Join-Path $Root "TTS")
+       Modules = @("fastapi", "uvicorn", "dotenv", "gnani")
+       Hint = "'gnani' is the Gnani SDK (gnani-vachana); install it into $Python yourself."
+       Command = "& '$Python' -m uvicorn tts_service:app --port 8006" },
     @{ Name = "Manager"; Port = 8003; Dir = (Join-Path $Root "manager"); WaitFor = @(8001, 8002)
        Modules = @("fastapi", "uvicorn", "httpx", "dotenv", "websockets")
        Command = "& '$Python' -m uvicorn main:app --port 8003" }

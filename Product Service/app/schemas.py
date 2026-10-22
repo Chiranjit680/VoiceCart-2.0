@@ -427,3 +427,37 @@ class ChatSessionEnd(BaseModel):
 # OrderOut.update_forward_refs()
 # ReviewOut.update_forward_refs()
 # ProductOut.update_forward_refs()
+
+
+# --- Shopper profile ---
+PROFILE_MAX_ITEMS = 30
+PROFILE_MAX_ITEM_CHARS = 80
+
+
+def _clean_list(values: List[str]) -> List[str]:
+    """Trimmed, no blanks, no repeats (ignoring case), each short enough to be one phrase, and not too many."""
+    cleaned, seen = [], set()
+    for value in values:
+        value = " ".join(str(value).split())
+        if not value or value.lower() in seen:
+            continue
+        if len(value) > PROFILE_MAX_ITEM_CHARS:
+            raise ValueError(f"Each entry must be at most {PROFILE_MAX_ITEM_CHARS} characters")
+        seen.add(value.lower())
+        cleaned.append(value)
+    if len(cleaned) > PROFILE_MAX_ITEMS:
+        raise ValueError(f"At most {PROFILE_MAX_ITEMS} entries")
+    return cleaned
+
+
+class ProfileIn(BaseModel):
+    age: Optional[int] = Field(default=None, ge=0, le=120)
+    preferences: List[str] = []
+    medical_conditions: List[str] = []
+
+    _clean_preferences = field_validator("preferences")(_clean_list)
+    _clean_conditions = field_validator("medical_conditions")(_clean_list)
+
+
+class ProfileOut(ProfileIn):
+    model_config = ConfigDict(from_attributes=True)
